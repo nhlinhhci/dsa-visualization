@@ -25,7 +25,23 @@ Thiếu ngôn ngữ nào thì ngôn ngữ đó báo "Không chạy được" khi
 
 ## Bảo mật
 
-Server chạy **code tùy ý** do người dùng gửi lên với quyền của tiến trình Node. Hiện chỉ có giới hạn thời gian (10 giây), giới hạn số bước (3000) và thư mục tạm riêng cho mỗi lần chạy — **không có sandbox**. Vì vậy server mặc định chỉ nghe trên `127.0.0.1`. Đừng mở ra mạng (`HOST=0.0.0.0`, `vite --host`) nếu chưa bọc phần chạy code trong container hoặc máy ảo.
+Server chạy **code tùy ý** do người dùng gửi lên. Có hai chế độ:
+
+- **Có sandbox** (`DSA_SANDBOX=1`, chỉ Linux, server chạy bằng root — Docker image đã bật sẵn): mỗi lượt chạy dùng một uid riêng không có quyền, không có mạng, thư mục tạm riêng, giới hạn số tiến trình / kích thước file / CPU, và mọi tiến trình còn sót bị diệt sau khi chạy xong.
+- **Không sandbox** (mặc định khi chạy `npm run dev` / `npm start` trên máy cá nhân): code chạy với quyền của tiến trình Node. Server mặc định chỉ nghe trên `127.0.0.1`; đừng mở ra mạng ở chế độ này.
+
+Cả hai chế độ đều giới hạn 10 giây và 3000 bước cho mỗi lượt chạy. Sandbox dựa trên uid và network namespace, không phải máy ảo riêng cho từng lượt, nên đừng để dữ liệu hay secret quan trọng trên máy chủ này. Trang không có đăng nhập: ai có link đều dùng được.
+
+## Đưa lên Fly.io
+
+Repo có sẵn `Dockerfile` và `fly.toml` (máy 2 CPU dùng chung, 2GB RAM, vùng Singapore, tự tắt khi không ai dùng).
+
+1. Cài `flyctl` và đăng nhập (`fly auth signup` hoặc `fly auth login`).
+2. Đổi `app` trong `fly.toml` thành tên của bạn, rồi tạo app: `fly apps create <tên>`.
+3. Deploy: `fly deploy --ha=false`. Trang sẽ ở `https://<tên>.fly.dev`.
+4. Kiểm tra trên máy thật: `fly ssh console -C "node /app/server/selftest.js"` — phải in "Tất cả đều đạt", kể cả các dòng `sandbox:`.
+
+`MAX_CONCURRENT_RUNS` (mặc định 4 trong image) là số lượt chạy code đồng thời; các lượt còn lại xếp hàng. `npm run selftest` cũng chạy được trên máy cá nhân (không kiểm tra sandbox). GitHub Actions build image và chạy selftest mỗi lần push.
 
 ## Hàm sinh viên cần viết
 
@@ -48,6 +64,7 @@ Server chạy **code tùy ý** do người dùng gửi lên với quyền của 
 - `npm start` — server production: phục vụ `dist/` và API (cổng `PORT`, mặc định 3001)
 - `npm run preview` — xem thử bản build (có kèm API)
 - `npm run lint` — kiểm tra code bằng Oxlint
+- `npm run selftest` — tự kiểm tra server chạy code
 
 ## Cấu trúc
 
@@ -59,5 +76,7 @@ Server chạy **code tùy ý** do người dùng gửi lên với quyền của 
 - `src/api/runCode.js` — gọi API chạy code
 - `server/runner.js` — biên dịch, chạy và chuyển trace thành `steps`
 - `server/harness/` — phần theo dõi thực thi cho từng ngôn ngữ
+- `server/selftest.js` — tự kiểm tra: chạy mọi code đáp án và thử các giới hạn của sandbox
+- `Dockerfile`, `fly.toml` — đóng gói và cấu hình deploy
 
 Thêm thuật toán mới: thêm template và `codeLines` trong `codeTemplates.js`, thêm mục trong `algorithmSpecs.js`, viết hàm sinh step trong `src/algorithms/` rồi đăng ký vào `src/algorithms/index.js`.

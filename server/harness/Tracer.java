@@ -70,7 +70,7 @@ public class Tracer {
     LaunchingConnector connector = Bootstrap.virtualMachineManager().defaultConnector();
     Map<String, Connector.Argument> arguments = connector.defaultArguments();
     arguments.get("main").setValue(mainArgs.toString());
-    arguments.get("options").setValue("-Xmx128m -cp \"" + classpath + "\"");
+    arguments.get("options").setValue("-Xmx128m -XX:+UseSerialGC -cp \"" + classpath + "\"");
     vm = connector.launch(arguments);
     Thread stdout = pipe(vm.process().getInputStream(), System.out);
     Thread stderr = pipe(vm.process().getErrorStream(), System.err);

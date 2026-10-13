@@ -1,0 +1,32 @@
+# Cấu hình Fly.io. Đổi `app` thành tên của bạn (phải là duy nhất trên toàn Fly.io),
+# trang sẽ có địa chỉ https://<app>.fly.dev
+app = 'dsa-visualization'
+# sin = Singapore, gần Việt Nam nhất.
+primary_region = 'sin'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Tự tắt máy khi không ai dùng và tự bật lại khi có người vào (lần vào đầu chờ vài giây).
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = 'requests'
+    soft_limit = 100
+    hard_limit = 250
+
+  [[http_service.checks]]
+    method = 'GET'
+    path = '/api/health'
+    interval = '30s'
+    timeout = '10s'
+    grace_period = '20s'
+
+[[vm]]
+  size = 'shared-cpu-2x'
+  memory = '2gb'

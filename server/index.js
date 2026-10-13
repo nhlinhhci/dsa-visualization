@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleApi } from './api.js'
+import { warmUp } from './runner.js'
 
 const DIST_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
 const PORT = Number(process.env.PORT) || 3001
@@ -41,4 +42,14 @@ createServer(async (req, res) => {
   if (!(await handleApi(req, res))) await serveStatic(req, res)
 }).listen(PORT, HOST, () => {
   console.log(`DSA Visualizer server: http://${HOST}:${PORT}`)
+  warmUp().then((status) => {
+    console.log('Code runner:', JSON.stringify(status))
+    const isLocal = ['127.0.0.1', 'localhost', '::1'].includes(HOST)
+    if (!status.sandbox && !isLocal) {
+      console.warn(
+        'CẢNH BÁO: server đang mở ra mạng mà không có sandbox (DSA_SANDBOX=1). ' +
+          'Code người dùng gửi lên sẽ chạy với toàn quyền của tiến trình này.',
+      )
+    }
+  })
 })

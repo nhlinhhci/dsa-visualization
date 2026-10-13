@@ -1,0 +1,37 @@
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t dsa-visualization .
+
+      # Chạy như trên Fly.io: root có đủ quyền để tạo sandbox (network namespace, đổi uid).
+      - name: Run code-runner selftest
+        run: |
+          set -o pipefail
+          docker run --rm --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            dsa-visualization node server/selftest.js | tee selftest.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### Code-runner selftest'
+            echo '```'
+            cat selftest.log 2>/dev/null || echo 'selftest did not run'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep '^FAIL' selftest.log 2>/dev/null | while read -r line; do echo "::error::$line"; done || true

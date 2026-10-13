@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chown, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +15,21 @@ const MAX_ARRAY_LENGTH = 50
 const MAX_OUTPUT_LENGTH = 8000
 const COMPILE_TIMEOUT = 30000
 const RUN_TIMEOUT = 10000
-const MAX_CONCURRENT_RUNS = 2
+const MAX_CONCURRENT_RUNS = Number(process.env.MAX_CONCURRENT_RUNS) || 2
+// Số request được xếp hàng chờ; quá số này thì báo server bận thay vì chờ vô hạn.
+const MAX_WAITING_RUNS = 200
+
+// Sandbox (chỉ Linux, server phải chạy bằng root): mỗi lượt chạy dùng một uid riêng không có quyền,
+// không có mạng và bị giới hạn tài nguyên. Bật bằng DSA_SANDBOX=1 (Dockerfile đã bật sẵn).
+const SANDBOX = process.env.DSA_SANDBOX === '1' && !IS_WINDOWS
+const SANDBOX_UID_BASE = 20000
+const SANDBOX_LIMITS = ['--nproc=256', '--fsize=33554432', '--cpu=30']
+// Giới hạn bộ nhớ ảo; không áp cho JVM vì JVM luôn đặt trước vài GB địa chỉ ảo.
+const SANDBOX_MEMORY = 1024 * 1024 * 1024
+// Trong network namespace mới chỉ có loopback (JDI cần nó để nối Tracer với chương trình),
+// sau đó bỏ quyền root trước khi chạy lệnh thật. $0 là uid, "$@" là lệnh.
+const SANDBOX_SCRIPT =
+  'ip link set lo up && exec setpriv --reuid="$0" --regid="$0" --clear-groups --no-new-privs -- "$@"'
 
 export const LANGUAGES = ['python', 'cpp', 'java']
 
@@ -36,13 +50,18 @@ function killTree(child) {
 }
 
 // Chạy một lệnh, gom stdout/stderr (có giới hạn) và kill cả cây tiến trình khi quá thời gian.
-function exec(command, args, { cwd, timeout }) {
+// `sandbox` là { uid, memory? }: nếu có, lệnh chạy bằng uid đó, không mạng, có giới hạn tài nguyên.
+function exec(command, args, { cwd, timeout, sandbox = null }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-    })
+    let env = { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    if (sandbox) {
+      const limits = [...SANDBOX_LIMITS, ...(sandbox.memory ? [`--as=${sandbox.memory}`] : [])]
+      args = [...limits, 'unshare', '--net', 'sh', '-c', SANDBOX_SCRIPT, String(sandbox.uid), command, ...args]
+      command = 'prlimit'
+      // Không truyền biến môi trường của server (có thể chứa secret) cho code sinh viên.
+      env = { PATH: process.env.PATH, HOME: cwd, TMPDIR: cwd, LANG: 'C.UTF-8', PYTHONIOENCODING: 'utf-8' }
+    }
+    const child = spawn(command, args, { cwd, windowsHide: true, env })
     let stdout = ''
     let stderr = ''
     let timedOut = false
@@ -132,7 +151,7 @@ async function readTrace(tracePath) {
   return records
 }
 
-async function runPython({ dir, code, array, target, spec, tracePath }) {
+async function runPython({ dir, code, array, target, spec, tracePath, sandbox }) {
   const python = await TOOLS.python()
   if (!python) throw new RunError('setup', MISSING_TOOL.python)
   const codePath = path.join(dir, 'solution.py')
@@ -149,7 +168,7 @@ async function runPython({ dir, code, array, target, spec, tracePath }) {
       // Chấp nhận cả tên kiểu snake_case lẫn camelCase.
       JSON.stringify({ array, target, kind: spec.kind, entry: [spec.entry.python, spec.entry.cpp] }),
     ],
-    { cwd: dir, timeout: RUN_TIMEOUT },
+    { cwd: dir, timeout: RUN_TIMEOUT, sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY } },
   )
 }
 
@@ -173,7 +192,7 @@ function entryCall(spec, name, arr, n, target) {
   return `${name}(${arr})`
 }
 
-async function runCpp({ dir, code, array, target, spec, tracePath }) {
+async function runCpp({ dir, code, array, target, spec, tracePath, sandbox }) {
   const compiler = await TOOLS.cpp()
   if (!compiler) throw new RunError('setup', MISSING_TOOL.cpp)
   const main = await readFile(path.join(HARNESS_DIR, 'cpp_main.cpp'), 'utf8')
@@ -198,7 +217,7 @@ async function runCpp({ dir, code, array, target, spec, tracePath }) {
       exe,
       'harness.cpp',
     ],
-    { cwd: dir, timeout: COMPILE_TIMEOUT },
+    { cwd: dir, timeout: COMPILE_TIMEOUT, sandbox },
   )
   if (compiled.timedOut) throw new RunError('timeout', 'Biên dịch quá lâu.')
   if (compiled.code !== 0) {
@@ -207,6 +226,7 @@ async function runCpp({ dir, code, array, target, spec, tracePath }) {
   return exec(exe, [tracePath, String(MAX_STEPS), String(target), ...array.map(String)], {
     cwd: dir,
     timeout: RUN_TIMEOUT,
+    sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY },
   })
 }
 
@@ -249,7 +269,7 @@ function buildTracer(javac, jdi) {
   return tracerBuild
 }
 
-async function runJava({ dir, code, array, target, spec, tracePath }) {
+async function runJava({ dir, code, array, target, spec, tracePath, sandbox }) {
   const [javac, java] = await Promise.all([TOOLS.javac(), TOOLS.java()])
   if (!javac || !java) throw new RunError('setup', MISSING_TOOL.java)
   const jdi = await getJdi()
@@ -263,14 +283,14 @@ async function runJava({ dir, code, array, target, spec, tracePath }) {
   const compiled = await exec(
     javac.command,
     ['-g', '-nowarn', '-encoding', 'UTF-8', '-d', dir, 'Solution.java', 'Main.java'],
-    { cwd: dir, timeout: COMPILE_TIMEOUT },
+    { cwd: dir, timeout: COMPILE_TIMEOUT, sandbox },
   )
   if (compiled.timedOut) throw new RunError('timeout', 'Biên dịch quá lâu.')
   if (compiled.code !== 0) {
     throw parseCompileError(compiled.stderr, 'Solution.java', spec.entry.java)
   }
 
-  const args = ['-cp', [tracerDir, ...jdi.classpath].join(path.delimiter)]
+  const args = ['-Xmx128m', '-XX:+UseSerialGC', '-cp', [tracerDir, ...jdi.classpath].join(path.delimiter)]
   if (jdi.version !== '1.8') args.unshift('--add-modules', 'jdk.jdi')
   return exec(
     java.command,
@@ -284,7 +304,7 @@ async function runJava({ dir, code, array, target, spec, tracePath }) {
       String(target),
       ...array.map(String),
     ],
-    { cwd: dir, timeout: RUN_TIMEOUT },
+    { cwd: dir, timeout: RUN_TIMEOUT, sandbox },
   )
 }
 
@@ -350,14 +370,18 @@ const TRACE_ERRORS = {
 
 const RUNNERS = { python: runPython, cpp: runCpp, java: runJava }
 
-async function runInTempDir({ language, code, array, target, spec }) {
+// `slot` là số thứ tự lượt chạy đồng thời (0..MAX_CONCURRENT_RUNS-1), quyết định uid của sandbox.
+async function runInTempDir({ language, code, array, target, spec, slot }) {
   const dir = await mkdtemp(path.join(tmpdir(), 'dsa-run-'))
   const tracePath = path.join(dir, 'trace.ndjson')
+  const sandbox = SANDBOX ? { uid: SANDBOX_UID_BASE + slot } : null
   try {
+    // mkdtemp tạo thư mục quyền 700: chỉ uid của lượt chạy này đọc/ghi được.
+    if (sandbox) await chown(dir, sandbox.uid, sandbox.uid)
     let result
     let error = null
     try {
-      result = await RUNNERS[language]({ dir, code, array, target, spec, tracePath })
+      result = await RUNNERS[language]({ dir, code, array, target, spec, tracePath, sandbox })
     } catch (e) {
       if (!(e instanceof RunError)) throw e
       error = e
@@ -400,6 +424,10 @@ async function runInTempDir({ language, code, array, target, spec }) {
       error: error && { type: error.type, line: error.line, message: error.message },
     }
   } finally {
+    // Diệt mọi tiến trình còn sót của uid này (vd. chương trình tự fork) trước khi nhường slot.
+    if (sandbox) {
+      await exec('pkill', ['-KILL', '-u', String(sandbox.uid)], { timeout: 5000 }).catch(() => {})
+    }
     rm(dir, { recursive: true, force: true }).catch(() => {})
   }
 }
@@ -422,22 +450,25 @@ function validate({ algorithm, language, code, array, target }) {
 }
 
 // Giới hạn số lượt chạy đồng thời để nhiều request không làm treo máy.
-let activeRuns = 0
+const freeSlots = Array.from({ length: MAX_CONCURRENT_RUNS }, (_, index) => index)
 const waiting = []
+
+function failure(type, message) {
+  return { steps: [], finalArray: null, result: null, output: '', error: { type, line: null, message } }
+}
 
 export async function runCode(request) {
   const invalid = validate(request)
   if (invalid) {
-    return {
-      steps: [],
-      finalArray: null,
-      result: null,
-      output: '',
-      error: { type: 'setup', line: null, message: invalid },
-    }
+    return failure('setup', invalid)
   }
-  if (activeRuns >= MAX_CONCURRENT_RUNS) await new Promise((resolve) => waiting.push(resolve))
-  activeRuns++
+  if (freeSlots.length === 0) {
+    if (waiting.length >= MAX_WAITING_RUNS) {
+      return failure('setup', 'Server đang quá tải, hãy thử lại sau ít giây.')
+    }
+    await new Promise((resolve) => waiting.push(resolve))
+  }
+  const slot = freeSlots.pop()
   try {
     return await runInTempDir({
       language: request.language,
@@ -445,9 +476,17 @@ export async function runCode(request) {
       array: request.array,
       target: Number.isInteger(request.target) ? request.target : 0,
       spec: algorithmSpecs[request.algorithm],
+      slot,
     })
   } finally {
-    activeRuns--
+    freeSlots.push(slot)
     waiting.shift()?.()
   }
+}
+
+// Gọi khi server khởi động: dò sẵn trình biên dịch và biên dịch Tracer để lượt Run đầu tiên không bị chậm.
+export async function warmUp() {
+  const languages = await getAvailableLanguages()
+  if (languages.java) await buildTracer(await TOOLS.javac(), await getJdi()).catch(() => {})
+  return { languages, sandbox: SANDBOX, maxConcurrentRuns: MAX_CONCURRENT_RUNS }
 }

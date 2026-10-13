@@ -1,16 +1,15 @@
 import { useState } from 'react'
 import { algorithmCategories, algorithms } from './algorithms/index.js'
 import AlgorithmMenu from './components/AlgorithmMenu.jsx'
+import { getStarterCode } from './data/algorithmSpecs.js'
 import SearchingVisualizer from './visualizers/SearchingVisualizer.jsx'
 import SortingVisualizer from './visualizers/SortingVisualizer.jsx'
-
-const EMPTY_USER_CODE = { python: '', cpp: '', java: '' }
 
 function App() {
   const [selectedId, setSelectedId] = useState(algorithms[0].id)
   const [language, setLanguage] = useState('python')
-  // Code sinh viên tự viết, theo từng thuật toán và ngôn ngữ. Chỉ giữ trong state:
-  // tải lại trang là IDE trống để sinh viên tự viết lại từ đầu.
+  // Code sinh viên tự viết, theo từng thuật toán và ngôn ngữ; chưa viết gì thì là khuôn hàm trống.
+  // Chỉ giữ trong state: tải lại trang là IDE về lại khuôn hàm để sinh viên tự viết lại từ đầu.
   const [userCode, setUserCode] = useState({})
 
   const algorithm = algorithms.find((item) => item.id === selectedId)
@@ -19,7 +18,7 @@ function App() {
   const handleUserCodeChange = (codeLanguage, value) => {
     setUserCode((current) => ({
       ...current,
-      [selectedId]: { ...EMPTY_USER_CODE, ...current[selectedId], [codeLanguage]: value },
+      [selectedId]: { ...getStarterCode(selectedId), ...current[selectedId], [codeLanguage]: value },
     }))
   }
 
@@ -41,7 +40,7 @@ function App() {
         algorithm={algorithm}
         language={language}
         setLanguage={setLanguage}
-        userCode={userCode[selectedId] ?? EMPTY_USER_CODE}
+        userCode={userCode[selectedId] ?? getStarterCode(selectedId)}
         onUserCodeChange={handleUserCodeChange}
       />
     </div>

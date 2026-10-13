@@ -68,3 +68,15 @@ export const algorithmSpecs = {
     },
   },
 }
+
+const STARTER_COMMENT = 'Viết code của bạn ở đây'
+
+// Khuôn hàm để sẵn trong IDE: đúng chữ ký, phần thân để trống cho sinh viên tự điền.
+export function getStarterCode(algorithmId) {
+  const { signatures } = algorithmSpecs[algorithmId]
+  return {
+    python: `${signatures.python}\n    # ${STARTER_COMMENT}\n    `,
+    cpp: `${signatures.cpp} {\n    // ${STARTER_COMMENT}\n    \n}`,
+    java: `${signatures.java} {\n    // ${STARTER_COMMENT}\n    \n}`,
+  }
+}

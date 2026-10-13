@@ -32,6 +32,20 @@ Server chạy **code tùy ý** do người dùng gửi lên. Có hai chế độ
 
 Cả hai chế độ đều giới hạn 10 giây và 3000 bước cho mỗi lượt chạy. Sandbox dựa trên uid và network namespace, không phải máy ảo riêng cho từng lượt, nên đừng để dữ liệu hay secret quan trọng trên máy chủ này. Trang không có đăng nhập: ai có link đều dùng được.
 
+## Chạy cho lớp học trên máy cá nhân (miễn phí)
+
+Không cần thuê server: bấm đúp `start-class.bat` trên máy Windows của giáo viên. Script sẽ:
+
+1. Build và chạy app trong Docker **có sandbox** (code sinh viên không đụng được tới máy bạn).
+2. Chạy `selftest` lần đầu và mỗi khi code thay đổi; nếu có mục lỗi sẽ hỏi trước khi mở cho lớp.
+3. Mở đường hầm Cloudflare miễn phí (`cloudflared`, tự cài nếu thiếu) để có link `https://....trycloudflare.com` vào được từ mọi mạng.
+4. Mở trang có link + mã QR để chiếu lên màn hình, đồng thời copy link vào clipboard.
+
+Cần cài trước: [Docker Desktop](https://www.docker.com/products/docker-desktop/). Lần đầu build mất 5–10 phút, các lần sau vài giây.
+Giữ cửa sổ mở suốt buổi học; nhấn Enter để tắt. Link Cloudflare đổi mỗi lần chạy lại.
+
+Tùy chọn (chạy `.\start-class.ps1` từ PowerShell): `-Port 8090`, `-MaxRuns 8` (số lượt chạy code cùng lúc, mặc định 6), `-NoTunnel` (chỉ dùng WiFi chung), `-ForceTest`.
+
 ## Đưa lên Fly.io
 
 Repo có sẵn `Dockerfile` và `fly.toml` (máy 2 CPU dùng chung, 2GB RAM, vùng Singapore, tự tắt khi không ai dùng).

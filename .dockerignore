@@ -5,3 +5,5 @@ dist
 .claude
 server/.cache
 *.log
+*.ps1
+*.bat

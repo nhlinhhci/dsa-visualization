@@ -37,5 +37,4 @@ jobs:
           grep '^FAIL' selftest.log 2>/dev/null | while read -r line; do echo "::error::$line"; done || true
           # Annotation xem được cả khi chưa đăng nhập GitHub.
           echo "::notice title=Selftest::$(grep -c '^ok' selftest.log) ok, $(grep -c '^FAIL' selftest.log) fail. $(grep '^Code runner' selftest.log)"
-          echo "::notice title=Sandbox::$(grep 'sandbox' selftest.log | grep -v '^Code runner' | tr '
-' ';')"
+          echo "::notice title=Sandbox::$(grep 'sandbox:' selftest.log | paste -sd ';' -)"

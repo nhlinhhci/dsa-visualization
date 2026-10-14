@@ -34,7 +34,8 @@ for (const language of LANGUAGES) {
           : array.indexOf(target)
       const actual = algorithm.category === 'sort' ? JSON.stringify(run.finalArray) : run.result
       report(
-        !run.error && actual === expected && run.steps.length > 0,
+        // Mỗi step phải kèm biến cục bộ (C++ cần gdb trên máy).
+        !run.error && actual === expected && run.steps.length > 0 && run.steps.some((step) => step.vars),
         `${algorithm.id}/${language}${target === undefined ? '' : ` target=${target}`}`,
         `${Date.now() - started}ms steps=${run.steps.length}${run.error ? ` ${JSON.stringify(run.error)}` : ''}`,
       )

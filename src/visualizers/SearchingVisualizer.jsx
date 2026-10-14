@@ -57,6 +57,7 @@ const searchingMode = {
       comparing={step.comparing}
       found={step.found ?? null}
       range={step.range ?? null}
+      vars={step.vars}
       result={step.result}
     />
   ),

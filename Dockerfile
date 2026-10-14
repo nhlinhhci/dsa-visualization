@@ -8,10 +8,11 @@ RUN npm run build
 
 # --- Image chạy thật: Node + Python, g++, JDK để chạy code sinh viên ---
 FROM node:22-bookworm-slim
+# gdb: đọc biến cục bộ của code C++.
 # iproute2, procps, util-linux: các lệnh ip, pkill, prlimit, unshare, setpriv mà sandbox dùng.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    python3 g++ default-jdk-headless iproute2 procps util-linux \
+    python3 g++ gdb default-jdk-headless iproute2 procps util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

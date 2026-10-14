@@ -1,4 +1,4 @@
-import VisualizerArea from '../components/VisualizerArea.jsx'
+import SortArea from '../components/SortArea.jsx'
 import AlgorithmVisualizer from './AlgorithmVisualizer.jsx'
 
 const ARRAY_SIZE = 10
@@ -16,11 +16,12 @@ const sortingMode = {
   }),
 
   renderArea: (step) => (
-    <VisualizerArea
+    <SortArea
       array={step.array}
       comparing={step.comparing}
       swapping={step.swapping}
       sorted={step.sorted}
+      vars={step.vars}
     />
   ),
 

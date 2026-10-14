@@ -17,7 +17,7 @@ jobs:
       - name: Build image
         run: docker build -t dsa-visualization .
 
-      # Chạy như trên Fly.io: root có đủ quyền để tạo sandbox (network namespace, đổi uid).
+      # Chạy như start-class.ps1: root có đủ quyền để tạo sandbox (network namespace, đổi uid).
       - name: Run code-runner selftest
         run: |
           set -o pipefail

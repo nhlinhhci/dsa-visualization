@@ -59,15 +59,47 @@ def main():
             for x in list.__iter__(arr)
         ]
 
-    state = {'line': None, 'count': 0}
+    MAX_LIST_ITEMS = 20
+
+    def describe(value):
+        """Giá trị một biến để hiển thị: số/bool giữ nguyên, list rút gọn, còn lại là chuỗi."""
+        if isinstance(value, bool) or value is None:
+            return value
+        if isinstance(value, int):
+            return value if abs(value) < 2 ** 53 else str(value)
+        if isinstance(value, float):
+            return value if value == value and abs(value) != float('inf') else str(value)
+        if isinstance(value, str):
+            return repr(value if len(value) <= 40 else value[:40] + '…')
+        if isinstance(value, (list, tuple)):
+            items = list(list.__iter__(value)) if isinstance(value, list) else list(value)
+            return {'list': [describe(x) if isinstance(x, (bool, int, float, str)) or x is None
+                             else type(x).__name__ for x in items[:MAX_LIST_ITEMS]],
+                    'length': len(items)}
+        return type(value).__name__
+
+    def variables(frame):
+        """Biến cục bộ của frame, bỏ qua mảng đang trực quan hóa (đã hiện ở bên trái) và hàm/module."""
+        result = {}
+        for name, value in frame.f_locals.items():
+            if name.startswith('__') or value is arr or callable(value) or type(value).__name__ == 'module':
+                continue
+            result[name] = describe(value)
+        return result
+
+    state = {'line': None, 'count': 0, 'frame': None}
 
     def flush():
         if state['line'] is None:
             return
+        # Biến lấy SAU khi dòng chạy xong, cùng thời điểm với trạng thái mảng.
+        frame = state['frame']
         emit({'t': 'step', 'line': state['line'], 'array': snapshot(),
-              'reads': reads[:], 'writes': writes[:]})
+              'reads': reads[:], 'writes': writes[:],
+              'scope': frame.f_code.co_name, 'vars': variables(frame)})
         del reads[:], writes[:]
         state['line'] = None
+        state['frame'] = None
 
     def tracer(frame, event, arg):
         if frame.f_code.co_filename != SOLUTION:
@@ -76,6 +108,7 @@ def main():
             flush()
             state['count'] += 1
             state['line'] = frame.f_lineno - 1
+            state['frame'] = frame
             if state['count'] > max_steps:
                 raise StepLimit()
         return tracer

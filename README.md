@@ -46,16 +46,11 @@ Giữ cửa sổ mở suốt buổi học; nhấn Enter để tắt. Link Cloudf
 
 Tùy chọn (chạy `.\start-class.ps1` từ PowerShell): `-Port 8090`, `-MaxRuns 8` (số lượt chạy code cùng lúc, mặc định 6), `-NoTunnel` (chỉ dùng WiFi chung), `-ForceTest`.
 
-## Đưa lên Fly.io
+## Kiểm tra server chạy code
 
-Repo có sẵn `Dockerfile` và `fly.toml` (máy 2 CPU dùng chung, 2GB RAM, vùng Singapore, tự tắt khi không ai dùng).
+`npm run selftest` chạy mọi code đáp án ở các ngôn ngữ có trên máy; trong Docker (sandbox bật) nó thử thêm các giới hạn của sandbox. GitHub Actions build Docker image và chạy selftest mỗi lần push.
 
-1. Cài `flyctl` và đăng nhập (`fly auth signup` hoặc `fly auth login`).
-2. Đổi `app` trong `fly.toml` thành tên của bạn, rồi tạo app: `fly apps create <tên>`.
-3. Deploy: `fly deploy --ha=false`. Trang sẽ ở `https://<tên>.fly.dev`.
-4. Kiểm tra trên máy thật: `fly ssh console -C "node /app/server/selftest.js"` — phải in "Tất cả đều đạt", kể cả các dòng `sandbox:`.
-
-`MAX_CONCURRENT_RUNS` (mặc định 4 trong image) là số lượt chạy code đồng thời; các lượt còn lại xếp hàng. `npm run selftest` cũng chạy được trên máy cá nhân (không kiểm tra sandbox). GitHub Actions build image và chạy selftest mỗi lần push.
+`MAX_CONCURRENT_RUNS` (mặc định 4 trong Docker image, `start-class` đặt 6) là số lượt chạy code đồng thời; các lượt còn lại xếp hàng.
 
 ## Hàm sinh viên cần viết
 
@@ -85,12 +80,12 @@ Repo có sẵn `Dockerfile` và `fly.toml` (máy 2 CPU dùng chung, 2GB RAM, vù
 - `src/data/codeTemplates.js` — code đáp án theo từng dòng và bảng `codeLines` (thao tác -> số dòng)
 - `src/data/algorithmSpecs.js` — tên hàm, chữ ký và cách gọi của từng thuật toán (dùng chung với server)
 - `src/algorithms/` — sinh `steps` cho code đáp án; `index.js` là danh sách thuật toán trên menu
-- `src/components/` — `VisualizerArea` (cột), `SearchArea` (ô lưới), `IDEPanel` (CodeMirror), `RunConsole`, `AlgorithmMenu`
+- `src/components/` — `ArrayNodes` (mảng dạng node, kèm biến chỉ số), `SortArea`, `SearchArea`, `VariablesPanel`, `IDEPanel` (CodeMirror), `RunConsole`, `AlgorithmMenu`
 - `src/visualizers/` — `AlgorithmVisualizer` (khung chung), `SortingVisualizer`, `SearchingVisualizer`
 - `src/api/runCode.js` — gọi API chạy code
 - `server/runner.js` — biên dịch, chạy và chuyển trace thành `steps`
 - `server/harness/` — phần theo dõi thực thi cho từng ngôn ngữ
 - `server/selftest.js` — tự kiểm tra: chạy mọi code đáp án và thử các giới hạn của sandbox
-- `Dockerfile`, `fly.toml` — đóng gói và cấu hình deploy
+- `Dockerfile` — image có sẵn Python, g++, gdb, JDK và sandbox (dùng cho `start-class` và GitHub Actions)
 
 Thêm thuật toán mới: thêm template và `codeLines` trong `codeTemplates.js`, thêm mục trong `algorithmSpecs.js`, viết hàm sinh step trong `src/algorithms/` rồi đăng ký vào `src/algorithms/index.js`.

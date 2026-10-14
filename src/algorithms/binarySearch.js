@@ -1,5 +1,5 @@
 import { codeLines } from '../data/codeTemplates.js'
-import { createStepRecorder } from './stepRecorder.js'
+import { createStepRecorder, nameFor } from './stepRecorder.js'
 
 export const binarySearchComplexity = {
   time: { best: 'O(1)', average: 'O(log n)', worst: 'O(log n)' },
@@ -11,20 +11,25 @@ export const binarySearchComplexity = {
 export function generateBinarySearchSteps(initialArray, { language = 'python', target } = {}) {
   const LINE = codeLines.binarySearch[language]
   const arr = [...initialArray]
-  const { steps, push } = createStepRecorder(arr)
+  const { steps, push, enter } = createStepRecorder(arr)
+  const v = { target, low: undefined, high: undefined, mid: undefined }
+  enter(nameFor(language, 'binary_search', 'binarySearch'), v)
 
   let low = 0
   let high = arr.length - 1
-  const pushRange = (line, comparing = [], extra = {}) =>
+  const pushRange = (line, comparing = [], extra = {}) => {
+    Object.assign(v, { low, high })
     push(line, comparing, false, { range: [low, high], ...extra })
+  }
 
-  pushRange(LINE.FUNCTION)
+  push(LINE.FUNCTION, [], false, { range: [low, high] })
   pushRange(LINE.INIT)
 
   while (true) {
     pushRange(LINE.WHILE)
     if (low > high) break
     const mid = Math.floor((low + high) / 2)
+    v.mid = mid
     pushRange(LINE.MID, [mid])
     pushRange(LINE.CHECK_EQUAL, [mid])
     if (arr[mid] === target) {

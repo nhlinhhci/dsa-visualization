@@ -1,4 +1,5 @@
 import { codeLines } from '../data/codeTemplates.js'
+import { createStepRecorder, nameFor } from './stepRecorder.js'
 
 export const bubbleSortComplexity = {
   basic: {
@@ -20,7 +21,7 @@ export const bubbleSortComplexity = {
   },
 }
 
-// `language` chỉ ảnh hưởng tới `lineHighlighted`; số lượng và thứ tự step giống nhau ở mọi ngôn ngữ.
+// `language` chỉ ảnh hưởng tới `lineHighlighted` và tên hàm; số lượng và thứ tự step giống nhau ở mọi ngôn ngữ.
 export function generateBubbleSortSteps(
   initialArray,
   { optimized = false, language = 'python' } = {},
@@ -29,38 +30,39 @@ export function generateBubbleSortSteps(
   const LINE = codeLines[templateKey][language]
   const arr = [...initialArray]
   const n = arr.length
-  const steps = []
-  const sorted = []
+  const { sorted, push, enter, finishSorted } = createStepRecorder(arr)
+  const v = { n: undefined, i: undefined, swapped: undefined, j: undefined }
+  enter(nameFor(language, 'bubble_sort', 'bubbleSort'), v)
 
-  const pushStep = (lineHighlighted, comparing = [], swapping = false) => {
-    steps.push({
-      array: [...arr],
-      comparing,
-      swapping,
-      sorted: [...sorted],
-      lineHighlighted,
-    })
-  }
-
-  pushStep(LINE.FUNCTION)
-  pushStep(LINE.GET_LENGTH)
+  push(LINE.FUNCTION)
+  v.n = n
+  push(LINE.GET_LENGTH)
 
   for (let i = 0; i < n - 1; i++) {
-    pushStep(LINE.OUTER_LOOP)
+    v.i = i
+    v.j = undefined
+    push(LINE.OUTER_LOOP)
 
     let swapped = false
-    if (optimized) pushStep(LINE.RESET_FLAG)
+    if (optimized) {
+      v.swapped = swapped
+      push(LINE.RESET_FLAG)
+    }
 
     for (let j = 0; j < n - i - 1; j++) {
-      pushStep(LINE.INNER_LOOP)
-      pushStep(LINE.COMPARE, [j, j + 1])
+      v.j = j
+      push(LINE.INNER_LOOP)
+      push(LINE.COMPARE, [j, j + 1])
 
       if (arr[j] > arr[j + 1]) {
         ;[arr[j], arr[j + 1]] = [arr[j + 1], arr[j]]
-        pushStep(LINE.SWAP, [j, j + 1], true)
+        push(LINE.SWAP, [j, j + 1], true)
 
         swapped = true
-        if (optimized) pushStep(LINE.SET_FLAG)
+        if (optimized) {
+          v.swapped = swapped
+          push(LINE.SET_FLAG)
+        }
       }
     }
 
@@ -68,18 +70,13 @@ export function generateBubbleSortSteps(
     sorted.push(n - i - 1)
 
     if (optimized) {
-      pushStep(LINE.CHECK_FLAG)
+      push(LINE.CHECK_FLAG)
       if (!swapped) {
-        pushStep(LINE.BREAK)
+        push(LINE.BREAK)
         break
       }
     }
   }
 
-  // Bước kết thúc: toàn bộ mảng đã sắp xếp, không còn dòng nào đang chạy.
-  sorted.length = 0
-  for (let k = 0; k < n; k++) sorted.push(k)
-  pushStep(null)
-
-  return steps
+  return finishSorted()
 }

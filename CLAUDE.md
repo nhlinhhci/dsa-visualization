@@ -12,7 +12,7 @@
 - `src/visualizers/` -> Nơi lắp ghép giao diện (SortingVisualizer, SearchingVisualizer).
 
 ## Quy chuẩn Trực quan hóa & Đồng bộ Code
-1. **Dữ liệu đầu vào:** Mảng số nguyên biểu diễn bằng các cột đứng (Sorting) hoặc ô lưới (Searching).
+1. **Dữ liệu đầu vào:** Mảng số nguyên biểu diễn bằng các node (ô) nằm ngang cho cả Sorting và Searching; các biến chỉ số (i, j, low, mid...) hiện ngay dưới node chúng trỏ tới.
 2. **Cơ chế Đồng bộ:** Thuật toán trong `src/algorithms/` chạy trước 1 lần trên mảng để sinh ra mảng các bước `steps`. Mỗi step bắt buộc phải có thuộc tính `lineHighlighted` để báo cho IDE biết cần tô sáng dòng nào.
 3. **Trạng thái Màu sắc:**
    - Mặc định: `bg-blue-500` hoặc `bg-slate-300`

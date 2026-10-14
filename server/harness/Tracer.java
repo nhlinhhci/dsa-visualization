@@ -58,6 +58,11 @@ public class Tracer {
   static int pendingLine = -1;
   static String pendingLocals = "{}";
   static String pendingAliases = "[]";
+  // Độ sâu stack, tên hàm và biến của dòng đang chạy, để đọc lại đúng frame đó khi dòng chạy xong.
+  static int pendingDepth;
+  static String pendingScope = "";
+  static String pendingVars = "{}";
+  static final int MAX_LIST_ITEMS = 20;
 
   public static void main(String[] args) throws Exception {
     String classpath = args[0];
@@ -119,13 +124,13 @@ public class Tracer {
       begin(thread);
     } else if (event instanceof StepEvent) {
       ThreadReference thread = ((StepEvent) event).thread();
-      finish();
+      finish(thread);
       begin(thread);
     } else if (event instanceof MethodExitEvent) {
       MethodExitEvent exit = (MethodExitEvent) event;
       if (stepRequest == null || !exit.method().name().equals(entryName)) return;
       if (exit.thread().frameCount() != entryDepth) return;
-      finish();
+      finish(exit.thread());
       requests.deleteEventRequest(stepRequest);
       exit.request().disable();
       // Giá trị trả về của hàm (index với thuật toán tìm kiếm); hàm void thì là null.
@@ -136,7 +141,7 @@ public class Tracer {
       out.flush();
     } else if (event instanceof ExceptionEvent) {
       ExceptionEvent exception = (ExceptionEvent) event;
-      finish();
+      finish(exception.thread());
       error("runtime", solutionLine(exception.thread()), describe(exception.exception()));
     } else if (event instanceof VMDeathEvent || event instanceof VMDisconnectEvent) {
       running = false;
@@ -152,6 +157,9 @@ public class Tracer {
       return;
     }
     pendingLine = line;
+    pendingDepth = thread.frameCount();
+    pendingScope = frame.location().method().name();
+    pendingVars = variables(frame);
     long dataId = dataArray().uniqueID();
     StringBuilder locals = new StringBuilder("{");
     StringBuilder aliases = new StringBuilder("[");
@@ -175,10 +183,16 @@ public class Tracer {
   }
 
   /** Kết thúc dòng đang chạy: ghi step với trạng thái mảng sau khi dòng đó thực thi. */
-  static void finish() {
+  static void finish(ThreadReference thread) throws Exception {
     if (pendingLine < 0) return;
+    // Biến lấy SAU khi dòng chạy xong: frame của dòng đó vẫn còn trên stack nếu hàm chưa return
+    // (có thể nằm dưới frame của hàm vừa được gọi); nếu đã return thì dùng giá trị lúc dòng bắt đầu.
+    String vars = pendingVars;
+    int depth = thread.frameCount();
+    if (depth >= pendingDepth) vars = variables(thread.frame(depth - pendingDepth));
     out.println("{\"t\":\"step\",\"line\":" + pendingLine + ",\"array\":" + readArray()
-        + ",\"locals\":" + pendingLocals + ",\"aliases\":" + pendingAliases + "}");
+        + ",\"locals\":" + pendingLocals + ",\"aliases\":" + pendingAliases
+        + ",\"scope\":\"" + escape(pendingScope) + "\",\"vars\":" + vars + "}");
     out.flush();
     pendingLine = -1;
   }
@@ -189,6 +203,61 @@ public class Tracer {
     out.flush();
     running = false;
     vm.exit(1);
+  }
+
+  /** Biến cục bộ của frame dưới dạng JSON, bỏ qua mảng đang trực quan hóa (đã hiện ở bên trái). */
+  static String variables(StackFrame frame) {
+    StringBuilder json = new StringBuilder("{");
+    try {
+      long dataId = dataArray().uniqueID();
+      for (LocalVariable variable : frame.visibleVariables()) {
+        Value value = frame.getValue(variable);
+        String text;
+        if (value instanceof ArrayReference) {
+          ArrayReference array = (ArrayReference) value;
+          if (array.uniqueID() == dataId) continue;
+          StringBuilder items = new StringBuilder("[");
+          List<Value> values = array.getValues(0, Math.min(array.length(), MAX_LIST_ITEMS));
+          for (int i = 0; i < values.size(); i++) {
+            if (i > 0) items.append(',');
+            items.append(describe(values.get(i)));
+          }
+          text = "{\"list\":" + items.append(']') + ",\"length\":" + array.length() + "}";
+        } else {
+          text = describe(value);
+        }
+        if (json.length() > 1) json.append(',');
+        json.append('"').append(escape(variable.name())).append("\":").append(text);
+      }
+    } catch (Exception e) {
+      // Không có thông tin debug hoặc frame không còn: không hiện biến.
+    }
+    return json.append('}').toString();
+  }
+
+  /** Một giá trị JDI dưới dạng JSON: số, true/false, chuỗi có ngoặc kép, hoặc tên kiểu. */
+  static String describe(Value value) {
+    if (value == null) return "null";
+    if (value instanceof com.sun.jdi.BooleanValue) {
+      return String.valueOf(((com.sun.jdi.BooleanValue) value).value());
+    }
+    if (value instanceof com.sun.jdi.CharValue) {
+      return quote("'" + ((com.sun.jdi.CharValue) value).value() + "'");
+    }
+    if (value instanceof com.sun.jdi.FloatValue || value instanceof com.sun.jdi.DoubleValue) {
+      double number = ((PrimitiveValue) value).doubleValue();
+      return Double.isNaN(number) || Double.isInfinite(number) ? quote(String.valueOf(number)) : String.valueOf(number);
+    }
+    if (value instanceof PrimitiveValue) return String.valueOf(((PrimitiveValue) value).longValue());
+    if (value instanceof StringReference) {
+      String text = ((StringReference) value).value();
+      return quote("\"" + (text.length() > 40 ? text.substring(0, 40) + "…" : text) + "\"");
+    }
+    return quote(value.type().name());
+  }
+
+  static String quote(String text) {
+    return "\"" + escape(text) + "\"";
   }
 
   static ArrayReference dataArray() {

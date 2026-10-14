@@ -10,8 +10,10 @@ import {
   Shuffle,
 } from 'lucide-react'
 import { runCode } from '../api/runCode.js'
+import CustomArrayInput from '../components/CustomArrayInput.jsx'
 import IDEPanel from '../components/IDEPanel.jsx'
 import RunConsole from '../components/RunConsole.jsx'
+import VariablesPanel from '../components/VariablesPanel.jsx'
 import { codeTemplates } from '../data/codeTemplates.js'
 
 const MIN_DELAY = 50
@@ -89,7 +91,14 @@ function AlgorithmVisualizer({
   )
 
   const lastStepIndex = steps.length - 1
-  const step = steps[Math.min(currentStepIndex, lastStepIndex)]
+  const shownStepIndex = Math.min(currentStepIndex, lastStepIndex)
+  const step = steps[shownStepIndex]
+  // Bước gần nhất (tính cả bước hiện tại) có thông tin biến: bước kết thúc không có biến nên giữ
+  // giá trị cuối cùng; kèm bước có biến ngay trước nó để tô các biến vừa đổi.
+  const varStepIndex = steps.findLastIndex((item, index) => index <= shownStepIndex && item.vars)
+  const previousVarStepIndex = steps.findLastIndex(
+    (item, index) => index < varStepIndex && item.vars,
+  )
   const isAtEnd = currentStepIndex >= lastStepIndex
   // Tới bước cuối thì coi như đã dừng, không cần setState thêm trong effect.
   const isAutoPlaying = isPlaying && !isAtEnd
@@ -189,6 +198,11 @@ function AlgorithmVisualizer({
           <Shuffle className="h-4 w-4" />
           Tạo mảng ngẫu nhiên
         </button>
+        <CustomArrayInput
+          requiresSorted={Boolean(algorithm.requiresSortedInput)}
+          onSubmit={(array) => handleChangeInput({ ...input, array })}
+          buttonClass={buttonClass}
+        />
         {InputControls && <InputControls input={input} onChange={handleChangeInput} />}
         <button
           type="button"
@@ -254,7 +268,15 @@ function AlgorithmVisualizer({
       </header>
 
       <main className="grid flex-1 grid-cols-1 content-start items-start gap-4 md:grid-cols-2">
-        {mode.renderArea(step, input)}
+        <div className="flex flex-col gap-4">
+          {mode.renderArea(step, input)}
+          <VariablesPanel
+            step={steps[varStepIndex]}
+            previousStep={steps[previousVarStepIndex]}
+            language={language}
+            hasRun={showResult || run.status === 'done'}
+          />
+        </div>
         <IDEPanel
           code={code}
           currentLine={step.lineHighlighted}

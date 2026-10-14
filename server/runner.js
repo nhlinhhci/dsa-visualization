@@ -112,6 +112,8 @@ const TOOLS = {
   python: () =>
     findTool('python', IS_WINDOWS ? ['python', 'py'] : ['python3', 'python'], ['--version']),
   cpp: () => findTool('cpp', ['g++', 'clang++'], ['--version']),
+  // Không bắt buộc: có gdb thì C++ hiện được biến cục bộ ở từng step.
+  gdb: () => findTool('gdb', ['gdb'], ['-nx', '-batch', '-ex', 'python import gdb']),
   javac: () => findTool('javac', ['javac'], ['-version']),
   java: () => findTool('java', ['java'], ['-XshowSettings:properties', '-version']),
 }
@@ -195,6 +197,7 @@ function entryCall(spec, name, arr, n, target) {
 async function runCpp({ dir, code, array, target, spec, tracePath, sandbox }) {
   const compiler = await TOOLS.cpp()
   if (!compiler) throw new RunError('setup', MISSING_TOOL.cpp)
+  const debuggerTool = await TOOLS.gdb()
   const main = await readFile(path.join(HARNESS_DIR, 'cpp_main.cpp'), 'utf8')
   // #line giữ cho số dòng trong thông báo lỗi và trong trace khớp với code sinh viên.
   const call = entryCall(spec, spec.entry.cpp, 'arr', 'n', 'target')
@@ -209,6 +212,7 @@ async function runCpp({ dir, code, array, target, spec, tracePath, sandbox }) {
       '-O0',
       '-w',
       '-fmax-errors=5',
+      ...(debuggerTool ? ['-g'] : []),
       // MinGW: link tĩnh để file .exe không phụ thuộc DLL của libstdc++ trên PATH.
       ...(IS_WINDOWS ? ['-static'] : []),
       '-I',
@@ -223,11 +227,32 @@ async function runCpp({ dir, code, array, target, spec, tracePath, sandbox }) {
   if (compiled.code !== 0) {
     throw parseCompileError(compiled.stderr, 'solution.cpp', spec.entry.cpp)
   }
-  return exec(exe, [tracePath, String(MAX_STEPS), String(target), ...array.map(String)], {
-    cwd: dir,
-    timeout: RUN_TIMEOUT,
-    sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY },
-  })
+  const outputPath = path.join(dir, 'output.txt')
+  const programArgs = [tracePath, String(MAX_STEPS), outputPath, String(target), ...array.map(String)]
+  if (!debuggerTool) {
+    return exec(exe, programArgs, {
+      cwd: dir,
+      timeout: RUN_TIMEOUT,
+      sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY },
+    })
+  }
+  // Chạy dưới gdb để đọc biến cục bộ; cpp_vars.py ghi chúng vào <trace>.vars.
+  return exec(
+    debuggerTool.command,
+    [
+      '-nx',
+      '-q',
+      '-batch',
+      '-ex',
+      `python VARS_PATH=r'${tracePath}.vars'`,
+      '-x',
+      path.join(HARNESS_DIR, 'cpp_vars.py'),
+      '--args',
+      exe,
+      ...programArgs,
+    ],
+    { cwd: dir, timeout: RUN_TIMEOUT, sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY * 2 } },
+  )
 }
 
 // JDK 8 để JDI trong tools.jar; từ JDK 9 là module jdk.jdi có sẵn.
@@ -355,6 +380,8 @@ function toSteps(records, language, code, initialArray) {
       swapping: writes.length > 0,
       sorted: [],
       lineHighlighted: record.line,
+      // Biến cục bộ sau khi dòng chạy xong và tên hàm đang chạy.
+      ...(record.vars && { vars: record.vars, scope: record.scope }),
     })
     previous = record.array
   }
@@ -388,6 +415,13 @@ async function runInTempDir({ language, code, array, target, spec, slot }) {
     }
 
     const records = await readTrace(tracePath)
+    // C++: biến của từng step do gdb ghi riêng, theo đúng thứ tự step của runtime.
+    const varRecords = language === 'cpp' ? await readTrace(`${tracePath}.vars`) : []
+    const crash = varRecords.find((record) => record.t === 'signal')
+    const stepVars = varRecords.filter((record) => record.vars)
+    records
+      .filter((record) => record.t === 'step')
+      .forEach((record, index) => Object.assign(record, stepVars[index]))
     const steps = toSteps(records, language, code, array)
     const traceError = records.find((record) => record.t === 'error')
     const done = records.find((record) => record.t === 'done')
@@ -405,6 +439,14 @@ async function runInTempDir({ language, code, array, target, spec, slot }) {
         `Chương trình chạy quá ${RUN_TIMEOUT / 1000} giây. Có thể có vòng lặp vô hạn.`,
         steps.at(-1)?.lineHighlighted ?? null,
       )
+    } else if (!error && !done && crash) {
+      error = new RunError(
+        'runtime',
+        crash.signal === 'RECURSION'
+          ? 'Đệ quy quá sâu: kiểm tra lại điều kiện dừng của hàm đệ quy.'
+          : `Chương trình bị dừng bởi tín hiệu ${crash.signal} (thường do truy cập sai vùng nhớ hoặc đệ quy quá sâu).`,
+        crash.line ?? steps.at(-1)?.lineHighlighted ?? null,
+      )
     } else if (!error && !done) {
       error = new RunError(
         'runtime',
@@ -415,12 +457,15 @@ async function runInTempDir({ language, code, array, target, spec, slot }) {
       error = new RunError('signature', TRACE_ERRORS.signature(language, spec))
     }
 
+    // C++ ghi output vào file riêng (stdout có thể lẫn thông báo của gdb).
+    const fileOutput =
+      language === 'cpp' ? await readFile(path.join(dir, 'output.txt'), 'utf8').catch(() => '') : null
     return {
       steps,
       finalArray: done?.final ?? null,
       // Giá trị hàm trả về (index với thuật toán tìm kiếm), null nếu không phải số nguyên.
       result: done?.result ?? null,
-      output: (result?.stdout ?? '').slice(0, MAX_OUTPUT_LENGTH),
+      output: (fileOutput ?? result?.stdout ?? '').slice(0, MAX_OUTPUT_LENGTH),
       error: error && { type: error.type, line: error.line, message: error.message },
     }
   } finally {

@@ -1,9 +1,11 @@
 import { Variable } from 'lucide-react'
 
 // Hiển thị một giá trị biến theo cú pháp của ngôn ngữ đang dùng.
-// Server gửi: số, true/false, null, chuỗi (đã có ngoặc), hoặc { list, length } cho mảng/list.
+// Server gửi: số, true/false, null, chuỗi (đã có ngoặc), { list, length } cho mảng/list,
+// hoặc { node, val } cho biến trỏ tới một node của danh sách liên kết.
 function formatValue(value, language) {
   if (value === null) return language === 'python' ? 'None' : 'null'
+  if (typeof value === 'object' && 'node' in value) return `Node(${formatValue(value.val, language)})`
   if (typeof value === 'boolean') {
     if (language === 'python') return value ? 'True' : 'False'
     return String(value)

@@ -37,13 +37,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Chạy `Main` (gọi hàm của sinh viên trong Solution) dưới trình gỡ lỗi JDI và ghi lại từng dòng được thực thi.
+ * Chạy `Main` (gọi hàm của sinh viên) dưới trình gỡ lỗi JDI và ghi lại từng dòng được thực thi trong class
+ * của sinh viên (`Solution` với thuật toán trên mảng, `SLL` với project Singly Linked List).
  *
- * Cách gọi: java Tracer <classpath> <trace_path> <max_steps> <tên hàm> <tham số của Main...>
+ * Cách gọi: java Tracer <classpath> <trace_path> <max_steps> <class> <tên hàm> <tham số của Main...>
+ * Nếu Main có field tĩnh `list` (object SLL), kết quả là danh sách đi từ `list.head` sau khi hàm chạy xong.
  * Mỗi dòng của trace_path là một bản ghi JSON: step / error / done.
  */
 public class Tracer {
-  static final String SOLUTION = "Solution";
+  static String solutionClass;
   static String entryName;
 
   static VirtualMachine vm;
@@ -62,6 +64,10 @@ public class Tracer {
   static int pendingDepth;
   static String pendingScope = "";
   static String pendingVars = "{}";
+  static String pendingHeap = "[]";
+  // Node của danh sách liên kết: lớp `Node` có field `val` và `next`.
+  static final String NODE_CLASS = "Node";
+  static final int MAX_NODES = 60;
   static final int MAX_LIST_ITEMS = 20;
 
   public static void main(String[] args) throws Exception {
@@ -69,8 +75,9 @@ public class Tracer {
     out = new PrintWriter(args[1], "UTF-8");
     maxSteps = Integer.parseInt(args[2]);
     StringBuilder mainArgs = new StringBuilder("Main");
-    entryName = args[3];
-    for (int i = 4; i < args.length; i++) mainArgs.append(' ').append(args[i]);
+    solutionClass = args[3];
+    entryName = args[4];
+    for (int i = 5; i < args.length; i++) mainArgs.append(' ').append(args[i]);
 
     LaunchingConnector connector = Bootstrap.virtualMachineManager().defaultConnector();
     Map<String, Connector.Argument> arguments = connector.defaultArguments();
@@ -82,7 +89,7 @@ public class Tracer {
 
     EventRequestManager requests = vm.eventRequestManager();
     ClassPrepareRequest prepare = requests.createClassPrepareRequest();
-    prepare.addClassFilter(SOLUTION);
+    prepare.addClassFilter(solutionClass);
     prepare.enable();
     ExceptionRequest uncaught = requests.createExceptionRequest(null, false, true);
     uncaught.enable();
@@ -118,7 +125,7 @@ public class Tracer {
       ThreadReference thread = entry.thread();
       entryDepth = thread.frameCount();
       stepRequest = requests.createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
-      stepRequest.addClassFilter(SOLUTION);
+      stepRequest.addClassFilter(solutionClass);
       stepRequest.enable();
       entry.request().disable();
       begin(thread);
@@ -134,10 +141,26 @@ public class Tracer {
       requests.deleteEventRequest(stepRequest);
       exit.request().disable();
       // Giá trị trả về của hàm (index với thuật toán tìm kiếm); hàm void thì là null.
+      // Project danh sách liên kết: kết quả là các giá trị đi theo next từ `Main.list.head`.
       Value returned = exit.returnValue();
-      String result = returned instanceof com.sun.jdi.IntegerValue
-          ? String.valueOf(((com.sun.jdi.IntegerValue) returned).value()) : "null";
-      out.println("{\"t\":\"done\",\"final\":" + readArray() + ",\"result\":" + result + "}");
+      ReferenceType main = vm.classesByName("Main").get(0);
+      Field listField = main.fieldByName("list");
+      if (listField != null) {
+        ObjectReference list = (ObjectReference) main.getValue(listField);
+        Value head = list == null ? null : list.getValue(list.referenceType().fieldByName("head"));
+        ObjectReference resultNode = isNode(head) ? (ObjectReference) head : null;
+        StringBuilder values = new StringBuilder("[");
+        for (ObjectReference node : walk(resultNode)) {
+          if (values.length() > 1) values.append(',');
+          values.append(describe(node.getValue(node.referenceType().fieldByName("val"))));
+        }
+        out.println("{\"t\":\"done\",\"final\":" + values.append(']') + ",\"result\":null,\"resultNode\":"
+            + (resultNode == null ? "null" : String.valueOf(resultNode.uniqueID())) + "}");
+      } else {
+        String result = returned instanceof com.sun.jdi.IntegerValue
+            ? String.valueOf(((com.sun.jdi.IntegerValue) returned).value()) : "null";
+        out.println("{\"t\":\"done\",\"final\":" + readArray() + ",\"result\":" + result + "}");
+      }
       out.flush();
     } else if (event instanceof ExceptionEvent) {
       ExceptionEvent exception = (ExceptionEvent) event;
@@ -160,6 +183,7 @@ public class Tracer {
     pendingDepth = thread.frameCount();
     pendingScope = frame.location().method().name();
     pendingVars = variables(frame);
+    pendingHeap = heap(frame);
     long dataId = dataArray().uniqueID();
     StringBuilder locals = new StringBuilder("{");
     StringBuilder aliases = new StringBuilder("[");
@@ -188,11 +212,17 @@ public class Tracer {
     // Biến lấy SAU khi dòng chạy xong: frame của dòng đó vẫn còn trên stack nếu hàm chưa return
     // (có thể nằm dưới frame của hàm vừa được gọi); nếu đã return thì dùng giá trị lúc dòng bắt đầu.
     String vars = pendingVars;
+    String nodes = pendingHeap;
     int depth = thread.frameCount();
-    if (depth >= pendingDepth) vars = variables(thread.frame(depth - pendingDepth));
+    if (depth >= pendingDepth) {
+      StackFrame frame = thread.frame(depth - pendingDepth);
+      vars = variables(frame);
+      nodes = heap(frame);
+    }
     out.println("{\"t\":\"step\",\"line\":" + pendingLine + ",\"array\":" + readArray()
         + ",\"locals\":" + pendingLocals + ",\"aliases\":" + pendingAliases
-        + ",\"scope\":\"" + escape(pendingScope) + "\",\"vars\":" + vars + "}");
+        + ",\"scope\":\"" + escape(pendingScope) + "\",\"vars\":" + vars
+        + (nodes.equals("[]") ? "" : ",\"heap\":" + nodes) + "}");
     out.flush();
     pendingLine = -1;
   }
@@ -205,10 +235,19 @@ public class Tracer {
     vm.exit(1);
   }
 
+  /** Field `head` của object đang chạy phương thức (`this` là SLL), hoặc null nếu không có. */
+  static Field headField(StackFrame frame) {
+    ObjectReference self = frame.thisObject();
+    return self == null ? null : self.referenceType().fieldByName("head");
+  }
+
   /** Biến cục bộ của frame dưới dạng JSON, bỏ qua mảng đang trực quan hóa (đã hiện ở bên trái). */
   static String variables(StackFrame frame) {
     StringBuilder json = new StringBuilder("{");
     try {
+      // Trong phương thức của SLL, sinh viên viết `head` (field của this): hiện như một biến.
+      Field head = headField(frame);
+      if (head != null) json.append("\"head\":").append(describe(frame.thisObject().getValue(head)));
       long dataId = dataArray().uniqueID();
       for (LocalVariable variable : frame.visibleVariables()) {
         Value value = frame.getValue(variable);
@@ -235,9 +274,60 @@ public class Tracer {
     return json.append('}').toString();
   }
 
-  /** Một giá trị JDI dưới dạng JSON: số, true/false, chuỗi có ngoặc kép, hoặc tên kiểu. */
+  static boolean isNode(Value value) {
+    return value instanceof ObjectReference && ((ObjectReference) value).referenceType().name().equals(NODE_CLASS);
+  }
+
+  /** Các node đi theo next từ `start` (dừng nếu gặp vòng lặp). */
+  static List<ObjectReference> walk(ObjectReference start) {
+    List<ObjectReference> nodes = new java.util.ArrayList<ObjectReference>();
+    java.util.Set<Long> seen = new java.util.HashSet<Long>();
+    Value current = start;
+    while (isNode(current) && nodes.size() < MAX_NODES) {
+      ObjectReference node = (ObjectReference) current;
+      if (!seen.add(node.uniqueID())) break;
+      nodes.add(node);
+      current = node.getValue(node.referenceType().fieldByName("next"));
+    }
+    return nodes;
+  }
+
+  /** Các node đi tới được từ biến cục bộ của frame: [{id, val, next}]. */
+  static String heap(StackFrame frame) {
+    StringBuilder json = new StringBuilder("[");
+    java.util.Set<Long> seen = new java.util.HashSet<Long>();
+    try {
+      // Gốc: field head của SLL (nếu đang trong phương thức của SLL) rồi tới các biến cục bộ.
+      List<Value> roots = new java.util.ArrayList<Value>();
+      Field head = headField(frame);
+      if (head != null) roots.add(frame.thisObject().getValue(head));
+      for (LocalVariable variable : frame.visibleVariables()) roots.add(frame.getValue(variable));
+      for (Value value : roots) {
+        if (!isNode(value)) continue;
+        for (ObjectReference node : walk((ObjectReference) value)) {
+          if (!seen.add(node.uniqueID())) break;
+          Value next = node.getValue(node.referenceType().fieldByName("next"));
+          if (json.length() > 1) json.append(',');
+          json.append("{\"id\":").append(node.uniqueID())
+              .append(",\"val\":").append(describe(node.getValue(node.referenceType().fieldByName("val"))))
+              .append(",\"next\":").append(isNode(next) ? String.valueOf(((ObjectReference) next).uniqueID()) : "null")
+              .append('}');
+        }
+      }
+    } catch (Exception e) {
+      // Không đọc được frame: không hiện node.
+    }
+    return json.append(']').toString();
+  }
+
+  /** Một giá trị JDI dưới dạng JSON: số, true/false, chuỗi có ngoặc kép, node, hoặc tên kiểu. */
   static String describe(Value value) {
     if (value == null) return "null";
+    if (isNode(value)) {
+      ObjectReference node = (ObjectReference) value;
+      return "{\"node\":" + node.uniqueID() + ",\"val\":"
+          + describe(node.getValue(node.referenceType().fieldByName("val"))) + "}";
+    }
     if (value instanceof com.sun.jdi.BooleanValue) {
       return String.valueOf(((com.sun.jdi.BooleanValue) value).value());
     }
@@ -280,7 +370,7 @@ public class Tracer {
   static int solutionLine(ThreadReference thread) throws Exception {
     for (StackFrame frame : thread.frames()) {
       Location location = frame.location();
-      if (location.declaringType().name().equals(SOLUTION)) return location.lineNumber() - 1;
+      if (location.declaringType().name().equals(solutionClass)) return location.lineNumber() - 1;
     }
     return -1;
   }

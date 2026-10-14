@@ -1,19 +1,28 @@
 """Script gdb: ghi lại biến cục bộ của code C++ sinh viên ở từng step.
 
-Runtime (cpp_runtime.h) gọi __dsa::begin() mỗi khi bắt đầu một step mới; ở đó script đọc:
-  - biến SAU khi dòng trước chạy xong (frame của dòng trước, nếu vẫn là cùng một lần gọi hàm),
-  - biến TRƯỚC khi dòng mới chạy (dùng khi frame của dòng đó đã return).
-Kết quả ghi vào VARS_PATH (NDJSON, một bản ghi mỗi step, theo đúng thứ tự step của runtime).
+Có hai chế độ (biến MODE):
+  - 'begin' (mặc định, thuật toán trên mảng): runtime (cpp_runtime.h) gọi __dsa::begin() mỗi khi bắt
+    đầu một step mới; ở đó script đọc biến SAU khi dòng trước chạy xong (frame của dòng trước, nếu vẫn
+    là cùng một lần gọi hàm), hoặc biến TRƯỚC khi dòng đó chạy nếu frame đã return. Mỗi bản ghi chỉ có
+    biến; dòng và mảng lấy từ trace của runtime theo đúng thứ tự step.
+  - 'lines' (danh sách liên kết, không có truy cập mảng để runtime bắt): gdb tự đi từng dòng của hàm
+    ENTRY bằng lệnh step; mỗi bản ghi là một step đầy đủ (dòng, biến, các node đi tới được).
+Kết quả ghi vào VARS_PATH (NDJSON).
 
 Cách gọi: gdb -nx -q -batch -ex "python VARS_PATH=r'...'" -x cpp_vars.py --args <chương trình> <tham số...>
+  (chế độ 'lines' thêm: MODE='lines'; ENTRY='SLL::insertAtHead'; MAX_STEPS=3000; SOLUTION_FILE='SLL.cpp')
 """
 import json
 import re
 
 import gdb
 
-SOLUTION_FILE = 'solution.cpp'
+# File code sinh viên (chế độ 'lines' với project Singly Linked List: SLL.cpp).
+SOLUTION_FILE = globals().get('SOLUTION_FILE', 'solution.cpp')
 MAX_LIST_ITEMS = 20
+MAX_NODES = 60
+NODE_TYPE = 'Node'
+MODE = globals().get('MODE', 'begin')
 
 out = open(VARS_PATH, 'w', encoding='utf-8')  # noqa: F821 (VARS_PATH do lệnh gdb truyền vào)
 
@@ -44,12 +53,41 @@ def vector_items(vector):
     return [describe(start[i]) for i in range(min(length, MAX_LIST_ITEMS))], length
 
 
+def is_node_pointer(value):
+    value_type = value.type.strip_typedefs()
+    return value_type.code == gdb.TYPE_CODE_PTR and str(value_type.target().strip_typedefs()) == NODE_TYPE
+
+
+def walk(pointer):
+    """(địa chỉ, node) đi theo next từ con trỏ `pointer` (dừng ở nullptr, vòng lặp hoặc vùng nhớ lỗi)."""
+    seen = set()
+    while len(seen) < MAX_NODES:
+        address = int(pointer)
+        if address == 0 or address in seen:
+            return
+        seen.add(address)
+        try:
+            node = pointer.dereference()
+            next_pointer = node['next']
+            node['val'].fetch_lazy()
+        except (gdb.error, gdb.MemoryError):
+            return
+        yield address, node
+        pointer = next_pointer
+
+
 def describe(value):
     value_type = value.type.strip_typedefs()
     if value_type.code == gdb.TYPE_CODE_REF or value_type.code == gdb.TYPE_CODE_RVALUE_REF:
         value = value.referenced_value()
         value_type = value.type.strip_typedefs()
     code = value_type.code
+    if is_node_pointer(value):
+        for address, node in walk(value):
+            return {'node': str(address), 'val': describe(node['val'])}
+        return None
+    if code == gdb.TYPE_CODE_PTR:
+        return 'nullptr' if int(value) == 0 else str(value_type)
     if code == gdb.TYPE_CODE_BOOL:
         return bool(value)
     if code == gdb.TYPE_CODE_CHAR:
@@ -81,32 +119,64 @@ def is_traced_array(value):
     return str(value_type).startswith('__dsa::Vec<') and bool(value['traced'])
 
 
-def variables(frame):
-    """Biến đã khai báo (trước dòng frame đang đứng) trong mọi block đang mở của hàm."""
-    result = {}
+def frame_values(frame):
+    """(tên, giá trị) của các biến đã khai báo (trước dòng frame đang đứng) trong mọi block đang mở."""
+    seen = set()
     try:
         line = frame.find_sal().line
         block = frame.block()
     except RuntimeError:
-        return result
+        return
     while block is not None:
         for symbol in block:
-            if not (symbol.is_variable or symbol.is_argument) or symbol.name in result:
+            if not (symbol.is_variable or symbol.is_argument) or symbol.name in seen:
                 continue
             # gdb liệt kê cả biến khai báo ở dòng sau (chưa được gán): bỏ qua chúng.
             if not symbol.is_argument and symbol.line >= line:
                 continue
+            seen.add(symbol.name)
             try:
                 value = symbol.value(frame)
-                if is_traced_array(value):
+                if symbol.name == 'this':
+                    # Trong phương thức của SLL, sinh viên viết `head` (field của this): coi như một biến.
+                    target = value.dereference()
+                    if any(field.name == 'head' for field in target.type.strip_typedefs().fields()):
+                        yield 'head', target['head']
                     continue
-                result[symbol.name] = describe(value)
-            except (gdb.error, RuntimeError, ValueError):
+                yield symbol.name, value
+            except (gdb.error, gdb.MemoryError, RuntimeError, ValueError):
                 continue
         if block.function is not None:
             break
         block = block.superblock
+
+
+def variables(frame):
+    result = {}
+    for name, value in frame_values(frame):
+        try:
+            if is_traced_array(value):
+                continue
+            result[name] = describe(value)
+        except (gdb.error, gdb.MemoryError, RuntimeError, ValueError):
+            continue
     return result
+
+
+def heap(frame):
+    """Các node đi tới được từ biến con trỏ Node* của frame: [{id, val, next}]."""
+    nodes, seen = [], set()
+    for _, value in frame_values(frame):
+        if not is_node_pointer(value):
+            continue
+        for address, node in walk(value):
+            if address in seen:
+                break
+            seen.add(address)
+            next_address = int(node['next'])
+            nodes.append({'id': str(address), 'val': describe(node['val']),
+                          'next': str(next_address) if next_address else None})
+    return nodes
 
 
 # Đệ quy sâu hơn mức này thì dừng chương trình và báo lỗi (thường là đệ quy không có điểm dừng).
@@ -171,12 +241,88 @@ class BeginBreakpoint(gdb.Breakpoint):
         return False
 
 
+def scope_of(frame):
+    function = frame.function()
+    return function.name.split('(')[0] if function else ''
+
+
+def is_alive():
+    return gdb.selected_inferior().pid != 0
+
+
+def run_lines():
+    """Chế độ 'lines': đi từng dòng của hàm ENTRY (và các hàm sinh viên nó gọi) bằng lệnh step."""
+    stop_signal = [None]
+
+    def on_stop(event):
+        if isinstance(event, gdb.SignalEvent):
+            stop_signal[0] = event.stop_signal
+
+    gdb.events.stop.connect(on_stop)
+    gdb.Breakpoint(ENTRY, internal=True)  # noqa: F821 (ENTRY do lệnh gdb truyền vào)
+    gdb.execute('run', to_string=True)
+
+    # Dòng đang chạy: (frame key, dòng 0-based, tên hàm, biến và node lúc dòng bắt đầu).
+    current = None
+    returned_to_line = False
+    count = 0
+
+    def finish_current(frame):
+        # Trạng thái SAU khi dòng chạy xong nếu vẫn ở cùng frame; không thì dùng trạng thái lúc bắt đầu.
+        key, line, scope, before_vars, before_heap = current
+        same = frame is not None and frame_key(frame) == key
+        emit({'t': 'step', 'line': line, 'scope': scope, 'array': [], 'reads': [], 'writes': [],
+              'vars': variables(frame) if same else before_vars,
+              'heap': heap(frame) if same else before_heap})
+
+    while is_alive() and stop_signal[0] is None:
+        frame = gdb.selected_frame()
+        if in_solution(frame):
+            line = frame.find_sal().line - 1
+            key = frame_key(frame)
+            # Quay lại đúng dòng đang chạy sau khi `finish` ra khỏi hàm khác (vd. constructor của Node):
+            # vẫn là cùng một dòng, không tính là step mới.
+            if not (returned_to_line and current and current[0] == key and current[1] == line):
+                if current:
+                    finish_current(frame)
+                count += 1
+                if count > MAX_STEPS:  # noqa: F821
+                    emit({'t': 'error', 'kind': 'limit', 'line': line, 'message': ''})
+                    gdb.execute('kill')
+                    return
+                current = (key, line, scope_of(frame), variables(frame), heap(frame))
+            returned_to_line = False
+            gdb.execute('step', to_string=True)
+        elif any(in_solution(f) for f in user_frames(frame)):
+            # Đang ở trong code không phải của sinh viên (runtime, constructor của Node...): chạy cho xong.
+            gdb.execute('finish', to_string=True)
+            returned_to_line = True
+        else:
+            break
+
+    if current:
+        finish_current(None)
+    if stop_signal[0] is not None:
+        frames = list(user_frames(gdb.selected_frame()))
+        emit({'t': 'signal', 'signal': stop_signal[0],
+              'line': frames[0].find_sal().line - 1 if frames else None})
+        gdb.execute('kill')
+    elif is_alive():
+        # Hàm đã return về main: chạy nốt để main ghi kết quả.
+        gdb.execute('continue', to_string=True)
+
+
 gdb.execute('set pagination off')
 gdb.execute('set confirm off')
 gdb.execute('set print inferior-events off')
 gdb.execute('set print thread-events off')
 # Trong container không tắt được ASLR; không cần cho việc đọc biến.
 gdb.execute('set disable-randomization off')
+
+if MODE == 'lines':
+    run_lines()
+    out.close()
+    raise SystemExit
 
 # Đặt breakpoint ở đầu mọi hàm trong code sinh viên (sau phần prologue).
 seen_lines = set()

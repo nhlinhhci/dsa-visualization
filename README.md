@@ -1,6 +1,6 @@
 # DSA Visualizer
 
-Ứng dụng trực quan hóa thuật toán đồng bộ với code (React + Vite + Tailwind CSS). Sinh viên chọn thuật toán trên menu (Sort Algorithms / Search Algorithms), tự viết code bằng Python, C++ hoặc Java, bấm Run và xem mảng thay đổi theo đúng code của mình.
+Ứng dụng trực quan hóa thuật toán đồng bộ với code (React + Vite + Tailwind CSS). Sinh viên chọn thuật toán trên menu (Sort Algorithms / Search Algorithms / Data Structures), tự viết code bằng Python, C++ hoặc Java, bấm Run và xem mảng thay đổi theo đúng code của mình.
 
 ## Chạy dự án
 
@@ -63,8 +63,31 @@ Tùy chọn (chạy `.\start-class.ps1` từ PowerShell): `-Port 8090`, `-MaxRun
 | Quick Sort | `quick_sort(arr, low, high)` | `void quickSort(arr, int low, int high)` |
 | Linear Search | `linear_search(arr, target)` | `int linearSearch(arr, int target)` |
 | Binary Search | `binary_search(arr, target)` | `int binarySearch(arr, int target)` |
-
 `arr` là `vector<int>&` trong C++ và `int[]` trong Java. Hàm sắp xếp làm việc tại chỗ trên `arr` (Merge Sort và Quick Sort được gọi với `0` và `n - 1`); hàm tìm kiếm trả về index hoặc `-1`. Chữ ký đầy đủ nằm trong `src/data/algorithmSpecs.js`. Số dòng trong editor và trong thông báo lỗi đều bắt đầu từ 0.
+
+### Data Structures: project Singly Linked List
+
+IDE hiện một project hoàn chỉnh; 9 thao tác dùng chung một bộ file, chọn thao tác nào thì IDE mở file sinh viên viết và nhảy tới phương thức đó. Các file còn lại chỉ đọc, để tham khảo.
+
+| Ngôn ngữ | File sinh viên viết | File chỉ đọc |
+|---|---|---|
+| Python | `main.py` — phần `class SLL` | `class Node` (đầu file) và `main()` (cuối file) trong cùng `main.py` |
+| C++ | `SLL.cpp` | `SLL.h`, `Node.h`, `Node.cpp`, `main.cpp` |
+| Java | `SLL.java` | `Node.java`, `Main.java` |
+
+Mỗi thao tác là một phương thức của `SLL`, thay đổi `head` tại chỗ:
+
+| Thao tác | Python | C++ / Java |
+|---|---|---|
+| Insert at Head / Tail | `insert_at_head(self, val)` / `insert_at_tail(self, val)` | `insertAtHead(int val)` / `insertAtTail(int val)` |
+| Insert at Position | `insert_at_position(self, pos, val)` | `insertAtPosition(int pos, int val)` |
+| Delete at Head / Tail | `delete_at_head(self)` / `delete_at_tail(self)` | `deleteAtHead()` / `deleteAtTail()` |
+| Delete at Position | `delete_at_position(self, pos)` | `deleteAtPosition(int pos)` |
+| Delete by Value | `delete_by_value(self, val)` | `deleteByValue(int val)` |
+| Reverse | `reverse(self)` | `reverse()` |
+| Traversal | `traverse(self)` | `traverse()` |
+
+`main` được sinh theo danh sách / vị trí / giá trị đang nhập và đúng với những gì server chạy: dựng danh sách, gọi phương thức đang chọn, rồi chấm danh sách đi từ `head`. Vị trí `pos` tính từ 0; vị trí vượt quá độ dài danh sách thì giữ nguyên danh sách. Delete by Value xóa node đầu tiên có giá trị bằng `val`. Traversal in giá trị các node theo thứ tự (định dạng tùy ý, vd. `3 -> 1 -> 4`); chỉ các số nguyên trong output được dùng để chấm. Nội dung các file nằm trong `src/data/projects/singlyLinkedList.js` (dùng chung cho giao diện và server).
 
 ## Scripts
 
@@ -79,12 +102,13 @@ Tùy chọn (chạy `.\start-class.ps1` từ PowerShell): `-Port 8090`, `-MaxRun
 
 - `src/data/codeTemplates.js` — code đáp án theo từng dòng và bảng `codeLines` (thao tác -> số dòng)
 - `src/data/algorithmSpecs.js` — tên hàm, chữ ký và cách gọi của từng thuật toán (dùng chung với server)
+- `src/data/projects/singlyLinkedList.js` — các file của project Singly Linked List (dùng chung với server)
 - `src/algorithms/` — sinh `steps` cho code đáp án; `index.js` là danh sách thuật toán trên menu
-- `src/components/` — `ArrayNodes` (mảng dạng node, kèm biến chỉ số), `SortArea`, `SearchArea`, `VariablesPanel`, `IDEPanel` (CodeMirror), `RunConsole`, `AlgorithmMenu`
-- `src/visualizers/` — `AlgorithmVisualizer` (khung chung), `SortingVisualizer`, `SearchingVisualizer`
+- `src/components/` — `LinkedListArea` (node + mũi tên next, SVG), `ArrayNodes` (mảng dạng node, kèm biến chỉ số), `SortArea`, `SearchArea`, `VariablesPanel`, `IDEPanel` (CodeMirror), `RunConsole`, `AlgorithmMenu`
+- `src/visualizers/` — `AlgorithmVisualizer` (khung chung), `SortingVisualizer`, `SearchingVisualizer`, `LinkedListVisualizer`
 - `src/api/runCode.js` — gọi API chạy code
 - `server/runner.js` — biên dịch, chạy và chuyển trace thành `steps`
-- `server/harness/` — phần theo dõi thực thi cho từng ngôn ngữ
+- `server/harness/` — phần theo dõi thực thi cho từng ngôn ngữ (project SLL: `cpp_sll_main.cpp` + gdb đi từng dòng trong `SLL.cpp`; Java: `MainSll.java`)
 - `server/selftest.js` — tự kiểm tra: chạy mọi code đáp án và thử các giới hạn của sandbox
 - `Dockerfile` — image có sẵn Python, g++, gdb, JDK và sandbox (dùng cho `start-class` và GitHub Actions)
 

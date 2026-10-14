@@ -3,6 +3,10 @@
 //   sort      -> f(arr)
 //   sortRange -> f(arr, 0, n - 1)
 //   search    -> f(arr, target), trả về index hoặc -1
+//   sllMethod -> phương thức của class SLL trong project Singly Linked List (src/data/projects/):
+//                server dựng danh sách từ `array`, gọi list.<method>(params) rồi đọc lại list.head
+import { getSllStarter, SLL_OPERATIONS, SLL_WORK_FILE, sllSignature } from './projects/singlyLinkedList.js'
+
 export const algorithmSpecs = {
   bubbleSort: {
     kind: 'sort',
@@ -67,16 +71,39 @@ export const algorithmSpecs = {
       java: 'int binarySearch(int[] arr, int target)',
     },
   },
+  // Singly Linked List: xem SLL_SPECS bên dưới.
+}
+
+// Mỗi thao tác Singly Linked List là một phương thức của class SLL. `signatures` kèm tên file để
+// thông báo cho sinh viên biết viết ở đâu.
+for (const operation of SLL_OPERATIONS) {
+  algorithmSpecs[operation.id] = {
+    kind: 'sllMethod',
+    project: 'singlyLinkedList',
+    entry: { python: operation.python, cpp: operation.method, java: operation.method },
+    params: operation.params,
+    signatures: Object.fromEntries(
+      ['python', 'cpp', 'java'].map((language) => [
+        language,
+        `${sllSignature(operation, language)} trong ${SLL_WORK_FILE[language]}`,
+      ]),
+    ),
+  }
 }
 
 const STARTER_COMMENT = 'Viết code của bạn ở đây'
 
 // Khuôn hàm để sẵn trong IDE: đúng chữ ký, phần thân để trống cho sinh viên tự điền.
+// Thuật toán thuộc một project (vd. Singly Linked List): file của project, dùng chung cho mọi thao tác.
 export function getStarterCode(algorithmId) {
-  const { signatures } = algorithmSpecs[algorithmId]
+  const { signatures, project } = algorithmSpecs[algorithmId]
+  if (project === 'singlyLinkedList') return getSllStarter()
   return {
     python: `${signatures.python}\n    # ${STARTER_COMMENT}\n    `,
     cpp: `${signatures.cpp} {\n    // ${STARTER_COMMENT}\n    \n}`,
     java: `${signatures.java} {\n    // ${STARTER_COMMENT}\n    \n}`,
   }
 }
+
+// Khóa lưu code sinh viên: thuật toán trong cùng project dùng chung một bộ file.
+export const codeKeyOf = (algorithmId) => algorithmSpecs[algorithmId].project ?? algorithmId

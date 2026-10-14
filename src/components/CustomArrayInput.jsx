@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { ListPlus } from 'lucide-react'
 
-const MAX_LENGTH = 15
+const DEFAULT_MAX_LENGTH = 15
 const MAX_ABS_VALUE = 999
 
 // Đọc chuỗi "5, 3, 8" thành mảng số nguyên; trả về { array } hoặc { error }.
 // Dấu phẩy thừa (vd. ở cuối) được bỏ qua.
-function parseArray(text, requiresSorted) {
+function parseArray(text, { requiresSorted, maxLength, allowEmpty }) {
   const parts = text
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean)
-  if (parts.length === 0) return { error: 'Hãy nhập ít nhất một giá trị.' }
-  if (parts.length > MAX_LENGTH) return { error: `Tối đa ${MAX_LENGTH} phần tử.` }
+  if (parts.length === 0) {
+    return allowEmpty ? { array: [] } : { error: 'Hãy nhập ít nhất một giá trị.' }
+  }
+  if (parts.length > maxLength) return { error: `Tối đa ${maxLength} phần tử.` }
 
   const invalid = parts.find((part) => !/^-?\d+$/.test(part))
   if (invalid !== undefined) return { error: `"${invalid}" không phải số nguyên.` }
@@ -28,7 +30,15 @@ function parseArray(text, requiresSorted) {
 }
 
 // Nút "Mảng tự chọn": mở ô nhập các giá trị cách nhau bằng dấu phẩy, bấm Áp dụng (hoặc Enter) để dùng.
-function CustomArrayInput({ requiresSorted, onSubmit, buttonClass }) {
+// `allowEmpty`: chấp nhận ô trống (vd. danh sách liên kết rỗng).
+function CustomArrayInput({
+  requiresSorted = false,
+  maxLength = DEFAULT_MAX_LENGTH,
+  allowEmpty = false,
+  label = 'Mảng tự chọn',
+  onSubmit,
+  buttonClass,
+}) {
   const [isOpen, setIsOpen] = useState(false)
   const [text, setText] = useState('')
   const [error, setError] = useState(null)
@@ -52,7 +62,7 @@ function CustomArrayInput({ requiresSorted, onSubmit, buttonClass }) {
 
   const submit = (event) => {
     event.preventDefault()
-    const parsed = parseArray(text, requiresSorted)
+    const parsed = parseArray(text, { requiresSorted, maxLength, allowEmpty })
     if (parsed.error) {
       setError(parsed.error)
       return
@@ -70,7 +80,7 @@ function CustomArrayInput({ requiresSorted, onSubmit, buttonClass }) {
         aria-expanded={isOpen}
       >
         <ListPlus className="h-4 w-4" />
-        Mảng tự chọn
+        {label}
       </button>
 
       {isOpen && (
@@ -95,7 +105,9 @@ function CustomArrayInput({ requiresSorted, onSubmit, buttonClass }) {
           </label>
           <p className={`text-xs ${error ? 'text-red-400' : 'text-slate-500'}`}>
             {error ??
-              `Tối đa ${MAX_LENGTH} số nguyên${requiresSorted ? ', sắp xếp tăng dần' : ''}.`}
+              `Tối đa ${maxLength} số nguyên${requiresSorted ? ', sắp xếp tăng dần' : ''}${
+                allowEmpty ? '; để trống nếu muốn danh sách rỗng' : ''
+              }.`}
           </p>
           <div className="flex justify-end gap-2">
             <button

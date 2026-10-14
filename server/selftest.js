@@ -3,6 +3,7 @@
 // Cách dùng: `npm run selftest` (thoát với mã 1 nếu có lỗi).
 import { algorithms } from '../src/algorithms/index.js'
 import { codeTemplates } from '../src/data/codeTemplates.js'
+import { buildSllProject, getSllAnswer } from '../src/data/projects/singlyLinkedList.js'
 import { LANGUAGES, runCode, warmUp } from './runner.js'
 
 const UNSORTED = [38, 27, 43, 3, 9, 82, 10, 27]
@@ -24,19 +25,47 @@ for (const language of LANGUAGES) {
   }
   for (const algorithm of algorithms) {
     const array = algorithm.requiresSortedInput ? SORTED : UNSORTED
-    const code = codeTemplates[algorithm.id][language].join('\n')
-    for (const target of algorithm.category === 'search' ? [43, 5] : [undefined]) {
+    // Singly Linked List: file SLL đáp án của project (Python: cả main.py).
+    const code =
+      algorithm.category === 'dataStructure'
+        ? buildSllProject({
+            language,
+            sllText: getSllAnswer(language).text,
+            operationId: algorithm.id,
+            input: { array, target: 0, position: 0 },
+          }).runCode
+        : codeTemplates[algorithm.id][language].join('\n')
+    const targets = {
+      search: [43, 5],
+      // Danh sách liên kết: một giá trị có trong danh sách (để xóa) và một giá trị mới (để chèn).
+      dataStructure: algorithm.targetLabel ? [27, 5] : [undefined],
+    }[algorithm.category] ?? [undefined]
+    // Vị trí: một vị trí ở giữa và một vị trí vượt quá độ dài danh sách.
+    const positions = algorithm.positionLabel ? [2, 20] : [undefined]
+    for (const [target, position] of targets.flatMap((t) => positions.map((p) => [t, p]))) {
       const started = Date.now()
-      const run = await runCode({ algorithm: algorithm.id, language, code, array, target })
-      const expected =
-        algorithm.category === 'sort'
-          ? JSON.stringify([...array].sort((a, b) => a - b))
-          : array.indexOf(target)
-      const actual = algorithm.category === 'sort' ? JSON.stringify(run.finalArray) : run.result
+      const run = await runCode({ algorithm: algorithm.id, language, code, array, target, position })
+      const expected = {
+        sort: () => JSON.stringify([...array].sort((a, b) => a - b)),
+        search: () => array.indexOf(target),
+        dataStructure: () => JSON.stringify(algorithm.expected(array, target, position)),
+      }[algorithm.category]()
+      // Traversal: các số in ra phải đúng thứ tự các node.
+      const printed = JSON.stringify((run.output.match(/-?\d+/g) ?? []).map(Number))
+      const actual =
+        algorithm.category === 'search'
+          ? run.result
+          : algorithm.id === 'traverse'
+            ? printed
+            : JSON.stringify(run.finalArray)
+      // Danh sách liên kết: step phải kèm các node (heap).
+      const hasHeap = algorithm.category !== 'dataStructure' || run.steps.some((step) => step.heap?.length)
       report(
         // Mỗi step phải kèm biến cục bộ (C++ cần gdb trên máy).
-        !run.error && actual === expected && run.steps.length > 0 && run.steps.some((step) => step.vars),
-        `${algorithm.id}/${language}${target === undefined ? '' : ` target=${target}`}`,
+        !run.error && actual === expected && run.steps.length > 0 && run.steps.some((step) => step.vars) && hasHeap,
+        `${algorithm.id}/${language}${target === undefined ? '' : ` target=${target}`}${
+          position === undefined ? '' : ` pos=${position}`
+        }`,
         `${Date.now() - started}ms steps=${run.steps.length}${run.error ? ` ${JSON.stringify(run.error)}` : ''}`,
       )
     }

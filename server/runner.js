@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { algorithmSpecs } from '../src/data/algorithmSpecs.js'
+import { SLL_PROVIDED_FILES } from '../src/data/projects/singlyLinkedList.js'
 
 const HARNESS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'harness')
 const CACHE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '.cache')
@@ -153,7 +154,7 @@ async function readTrace(tracePath) {
   return records
 }
 
-async function runPython({ dir, code, array, target, spec, tracePath, sandbox }) {
+async function runPython({ dir, code, array, target, position, spec, tracePath, sandbox }) {
   const python = await TOOLS.python()
   if (!python) throw new RunError('setup', MISSING_TOOL.python)
   const codePath = path.join(dir, 'solution.py')
@@ -168,7 +169,14 @@ async function runPython({ dir, code, array, target, spec, tracePath, sandbox })
       tracePath,
       String(MAX_STEPS),
       // Chấp nhận cả tên kiểu snake_case lẫn camelCase.
-      JSON.stringify({ array, target, kind: spec.kind, entry: [spec.entry.python, spec.entry.cpp] }),
+      JSON.stringify({
+        array,
+        target,
+        kind: spec.kind,
+        entry: [spec.entry.python, spec.entry.cpp],
+        // Phương thức SLL: giá trị tham số theo thứ tự khai báo (vị trí / giá trị).
+        args: methodArgs(spec, { target, position }),
+      }),
     ],
     { cwd: dir, timeout: RUN_TIMEOUT, sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY } },
   )
@@ -177,7 +185,13 @@ async function runPython({ dir, code, array, target, spec, tracePath, sandbox })
 // Lấy lỗi đầu tiên của trình biên dịch: `file:line[:col]: error: message`.
 function parseCompileError(stderr, solutionFile, entryName) {
   const match = stderr.match(/^(.*?):(\d+):(?:\d+:)?\s*(?:fatal )?error:\s*(.*)$/m)
-  if (!match) return new RunError('compile', stderr.trim().slice(0, 1000) || 'Lỗi biên dịch')
+  if (!match) {
+    // Lỗi khi link (vd. xóa mất định nghĩa SLL::insertAtHead): không có số dòng.
+    if (/undefined reference/.test(stderr) && stderr.includes(entryName)) {
+      return new RunError('signature', '')
+    }
+    return new RunError('compile', stderr.trim().slice(0, 1000) || 'Lỗi biên dịch')
+  }
   const [, file, line, message] = match
   if (path.basename(file) === solutionFile) {
     return new RunError('compile', message.trim(), Number(line) - 1)
@@ -187,6 +201,17 @@ function parseCompileError(stderr, solutionFile, entryName) {
   return new RunError('compile', message.trim())
 }
 
+// Giá trị tham số của phương thức SLL theo thứ tự khai báo: `pos` là vị trí, `val` là giá trị.
+function methodArgs(spec, { target, position }) {
+  return (spec.params ?? []).map((name) => (name === 'pos' ? position : target))
+}
+
+// Lời gọi phương thức SLL trong main do server sinh ra (biến `list`, `position`, `target` có sẵn).
+function sllCall(spec, name) {
+  const args = spec.params.map((param) => (param === 'pos' ? 'position' : 'target')).join(', ')
+  return `list.${name}(${args});`
+}
+
 // Lời gọi hàm của sinh viên theo `kind`, viết bằng cú pháp chung của C++ và Java.
 function entryCall(spec, name, arr, n, target) {
   if (spec.kind === 'sortRange') return `${name}(${arr}, 0, ${n} - 1)`
@@ -194,17 +219,8 @@ function entryCall(spec, name, arr, n, target) {
   return `${name}(${arr})`
 }
 
-async function runCpp({ dir, code, array, target, spec, tracePath, sandbox }) {
-  const compiler = await TOOLS.cpp()
-  if (!compiler) throw new RunError('setup', MISSING_TOOL.cpp)
-  const debuggerTool = await TOOLS.gdb()
-  const main = await readFile(path.join(HARNESS_DIR, 'cpp_main.cpp'), 'utf8')
-  // #line giữ cho số dòng trong thông báo lỗi và trong trace khớp với code sinh viên.
-  const call = entryCall(spec, spec.entry.cpp, 'arr', 'n', 'target')
-  const callMacro = `#define DSA_CALL(arr, n, target) (${spec.kind === 'search' ? call : `${call}, 0`})`
-  const source = `#include "cpp_runtime.h"\n#line 1 "solution.cpp"\n${code}\n#line 1 "cpp_main.cpp"\n${callMacro}\n${main}`
-  await writeFile(path.join(dir, 'harness.cpp'), source)
-  const exe = path.join(dir, IS_WINDOWS ? 'solution.exe' : 'solution')
+// Biên dịch C++: `sources` là các file .cpp trong `dir`; lỗi ở `solutionFile` báo kèm số dòng.
+async function compileCpp({ compiler, debuggerTool, dir, sources, exe, sandbox, solutionFile, entryName }) {
   const compiled = await exec(
     compiler.command,
     [
@@ -219,14 +235,91 @@ async function runCpp({ dir, code, array, target, spec, tracePath, sandbox }) {
       HARNESS_DIR,
       '-o',
       exe,
-      'harness.cpp',
+      ...sources,
     ],
     { cwd: dir, timeout: COMPILE_TIMEOUT, sandbox },
   )
   if (compiled.timedOut) throw new RunError('timeout', 'Biên dịch quá lâu.')
-  if (compiled.code !== 0) {
-    throw parseCompileError(compiled.stderr, 'solution.cpp', spec.entry.cpp)
+  if (compiled.code !== 0) throw parseCompileError(compiled.stderr, solutionFile, entryName)
+}
+
+// Project Singly Linked List: SLL.cpp của sinh viên + Node.h, Node.cpp, SLL.h cố định + main của server.
+// gdb tự đi từng dòng trong SLL.cpp (không có truy cập mảng cho runtime bắt).
+async function runCppSll({ dir, code, array, target, position, spec, tracePath, sandbox, compiler, debuggerTool }) {
+  await writeFile(path.join(dir, 'SLL.cpp'), code)
+  for (const [name, content] of Object.entries(SLL_PROVIDED_FILES.cpp)) {
+    await writeFile(path.join(dir, name), content)
   }
+  const main = await readFile(path.join(HARNESS_DIR, 'cpp_sll_main.cpp'), 'utf8')
+  await writeFile(path.join(dir, 'sll_main.cpp'), main.replace('/*DSA_CALL*/', sllCall(spec, spec.entry.cpp)))
+  const exe = path.join(dir, IS_WINDOWS ? 'solution.exe' : 'solution')
+  await compileCpp({
+    compiler,
+    debuggerTool,
+    dir,
+    sources: ['sll_main.cpp', 'SLL.cpp', 'Node.cpp'],
+    exe,
+    sandbox,
+    solutionFile: 'SLL.cpp',
+    entryName: spec.entry.cpp,
+  })
+  const programArgs = [
+    tracePath,
+    path.join(dir, 'output.txt'),
+    String(target),
+    String(position),
+    ...array.map(String),
+  ]
+  if (!debuggerTool) {
+    return exec(exe, programArgs, {
+      cwd: dir,
+      timeout: RUN_TIMEOUT,
+      sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY },
+    })
+  }
+  return exec(
+    debuggerTool.command,
+    [
+      '-nx',
+      '-q',
+      '-batch',
+      '-ex',
+      `python VARS_PATH=r'${tracePath}.vars'; MODE='lines'; ENTRY='SLL::${spec.entry.cpp}'; ` +
+        `MAX_STEPS=${MAX_STEPS}; SOLUTION_FILE='SLL.cpp'`,
+      '-x',
+      path.join(HARNESS_DIR, 'cpp_vars.py'),
+      '--args',
+      exe,
+      ...programArgs,
+    ],
+    { cwd: dir, timeout: RUN_TIMEOUT, sandbox: sandbox && { ...sandbox, memory: SANDBOX_MEMORY * 2 } },
+  )
+}
+
+async function runCpp({ dir, code, array, target, position, spec, tracePath, sandbox }) {
+  const compiler = await TOOLS.cpp()
+  if (!compiler) throw new RunError('setup', MISSING_TOOL.cpp)
+  const debuggerTool = await TOOLS.gdb()
+  if (spec.kind === 'sllMethod') {
+    return runCppSll({ dir, code, array, target, position, spec, tracePath, sandbox, compiler, debuggerTool })
+  }
+  const main = await readFile(path.join(HARNESS_DIR, 'cpp_main.cpp'), 'utf8')
+  // #line giữ cho số dòng trong thông báo lỗi và trong trace khớp với code sinh viên.
+  const call = entryCall(spec, spec.entry.cpp, 'arr', 'n', 'target')
+  const callMacro = `#define DSA_CALL(arr, n, target) (${spec.kind === 'search' ? call : `${call}, 0`})`
+  const source = `#include "cpp_runtime.h"\n#line 1 "solution.cpp"\n${code}\n#line 1 "cpp_main.cpp"\n${callMacro}\n${main}`
+  await writeFile(path.join(dir, 'harness.cpp'), source)
+  const exe = path.join(dir, IS_WINDOWS ? 'solution.exe' : 'solution')
+  await compileCpp({
+    compiler,
+    debuggerTool,
+    dir,
+    sources: ['harness.cpp'],
+    exe,
+    sandbox,
+    solutionFile: 'solution.cpp',
+    entryName: spec.entry.cpp,
+  })
   const outputPath = path.join(dir, 'output.txt')
   const programArgs = [tracePath, String(MAX_STEPS), outputPath, String(target), ...array.map(String)]
   if (!debuggerTool) {
@@ -294,25 +387,37 @@ function buildTracer(javac, jdi) {
   return tracerBuild
 }
 
-async function runJava({ dir, code, array, target, spec, tracePath, sandbox }) {
+async function runJava({ dir, code, array, target, position, spec, tracePath, sandbox }) {
   const [javac, java] = await Promise.all([TOOLS.javac(), TOOLS.java()])
   if (!javac || !java) throw new RunError('setup', MISSING_TOOL.java)
   const jdi = await getJdi()
   const tracerDir = await buildTracer(javac, jdi)
 
-  // Phần bọc class nằm cùng dòng đầu tiên để số dòng không bị lệch.
-  await writeFile(path.join(dir, 'Solution.java'), `import java.util.*; class Solution { ${code}\n}\n`)
-  const call = entryCall(spec, `new Solution().${spec.entry.java}`, 'data', 'data.length', 'target')
-  const main = await readFile(path.join(HARNESS_DIR, 'Main.java'), 'utf8')
-  await writeFile(path.join(dir, 'Main.java'), main.replace('/*DSA_CALL*/', `${call};`))
+  // Project Singly Linked List: SLL.java là file của sinh viên, Node.java cố định, Main do server sinh.
+  // Thuật toán trên mảng: code sinh viên được bọc trong class Solution (phần bọc nằm cùng dòng đầu
+  // tiên để số dòng không bị lệch).
+  const isSll = spec.kind === 'sllMethod'
+  const solutionClass = isSll ? 'SLL' : 'Solution'
+  const sources = isSll ? ['SLL.java', 'Node.java', 'Main.java'] : ['Solution.java', 'Main.java']
+  if (isSll) {
+    await writeFile(path.join(dir, 'SLL.java'), code)
+    await writeFile(path.join(dir, 'Node.java'), SLL_PROVIDED_FILES.java['Node.java'])
+    const main = await readFile(path.join(HARNESS_DIR, 'MainSll.java'), 'utf8')
+    await writeFile(path.join(dir, 'Main.java'), main.replace('/*DSA_CALL*/', sllCall(spec, spec.entry.java)))
+  } else {
+    await writeFile(path.join(dir, 'Solution.java'), `import java.util.*; class Solution { ${code}\n}\n`)
+    const call = entryCall(spec, `new Solution().${spec.entry.java}`, 'data', 'data.length', 'target')
+    const main = await readFile(path.join(HARNESS_DIR, 'Main.java'), 'utf8')
+    await writeFile(path.join(dir, 'Main.java'), main.replace('/*DSA_CALL*/', `${call};`))
+  }
   const compiled = await exec(
     javac.command,
-    ['-g', '-nowarn', '-encoding', 'UTF-8', '-d', dir, 'Solution.java', 'Main.java'],
+    ['-g', '-nowarn', '-encoding', 'UTF-8', '-d', dir, ...sources],
     { cwd: dir, timeout: COMPILE_TIMEOUT, sandbox },
   )
   if (compiled.timedOut) throw new RunError('timeout', 'Biên dịch quá lâu.')
   if (compiled.code !== 0) {
-    throw parseCompileError(compiled.stderr, 'Solution.java', spec.entry.java)
+    throw parseCompileError(compiled.stderr, `${solutionClass}.java`, spec.entry.java)
   }
 
   const args = ['-Xmx128m', '-XX:+UseSerialGC', '-cp', [tracerDir, ...jdi.classpath].join(path.delimiter)]
@@ -325,8 +430,10 @@ async function runJava({ dir, code, array, target, spec, tracePath, sandbox }) {
       dir,
       tracePath,
       String(MAX_STEPS),
+      solutionClass,
       spec.entry.java,
       String(target),
+      ...(isSll ? [String(position)] : []),
       ...array.map(String),
     ],
     { cwd: dir, timeout: RUN_TIMEOUT, sandbox },
@@ -382,10 +489,35 @@ function toSteps(records, language, code, initialArray) {
       lineHighlighted: record.line,
       // Biến cục bộ sau khi dòng chạy xong và tên hàm đang chạy.
       ...(record.vars && { vars: record.vars, scope: record.scope }),
+      // Danh sách liên kết: các node đi tới được từ biến cục bộ.
+      ...(record.heap && { heap: record.heap }),
     })
     previous = record.array
   }
   return steps
+}
+
+// Id node do mỗi ngôn ngữ gửi về là địa chỉ / id nội bộ (số rất lớn, khác nhau mỗi lần chạy).
+// Đổi thành n1, n2... theo thứ tự xuất hiện, để giống step của code đáp án.
+function normalizeNodeIds(steps, resultNode) {
+  const ids = new Map()
+  const rename = (raw) => {
+    if (raw === null || raw === undefined || String(raw) === '0') return null
+    const key = String(raw)
+    if (!ids.has(key)) ids.set(key, `n${ids.size + 1}`)
+    return ids.get(key)
+  }
+  for (const step of steps) {
+    if (step.heap) {
+      step.heap = step.heap.map((node) => ({ ...node, id: rename(node.id), next: rename(node.next) }))
+    }
+    for (const [name, value] of Object.entries(step.vars ?? {})) {
+      if (value && typeof value === 'object' && 'node' in value) {
+        step.vars[name] = { ...value, node: rename(value.node) }
+      }
+    }
+  }
+  return rename(resultNode)
 }
 
 const TRACE_ERRORS = {
@@ -398,7 +530,7 @@ const TRACE_ERRORS = {
 const RUNNERS = { python: runPython, cpp: runCpp, java: runJava }
 
 // `slot` là số thứ tự lượt chạy đồng thời (0..MAX_CONCURRENT_RUNS-1), quyết định uid của sandbox.
-async function runInTempDir({ language, code, array, target, spec, slot }) {
+async function runInTempDir({ language, code, array, target, position, spec, slot }) {
   const dir = await mkdtemp(path.join(tmpdir(), 'dsa-run-'))
   const tracePath = path.join(dir, 'trace.ndjson')
   const sandbox = SANDBOX ? { uid: SANDBOX_UID_BASE + slot } : null
@@ -408,20 +540,28 @@ async function runInTempDir({ language, code, array, target, spec, slot }) {
     let result
     let error = null
     try {
-      result = await RUNNERS[language]({ dir, code, array, target, spec, tracePath, sandbox })
+      result = await RUNNERS[language]({ dir, code, array, target, position, spec, tracePath, sandbox })
     } catch (e) {
       if (!(e instanceof RunError)) throw e
       error = e
     }
 
-    const records = await readTrace(tracePath)
+    let records = await readTrace(tracePath)
     // C++: biến của từng step do gdb ghi riêng, theo đúng thứ tự step của runtime.
     const varRecords = language === 'cpp' ? await readTrace(`${tracePath}.vars`) : []
     const crash = varRecords.find((record) => record.t === 'signal')
-    const stepVars = varRecords.filter((record) => record.vars)
-    records
-      .filter((record) => record.t === 'step')
-      .forEach((record, index) => Object.assign(record, stepVars[index]))
+    if (language === 'cpp' && spec.kind === 'sllMethod') {
+      // Danh sách liên kết: step do gdb ghi (đi từng dòng); kết quả và lỗi vẫn lấy từ runtime.
+      records = [
+        ...varRecords.filter((record) => record.t === 'step' || record.t === 'error'),
+        ...records.filter((record) => record.t !== 'step'),
+      ]
+    } else {
+      const stepVars = varRecords.filter((record) => record.vars)
+      records
+        .filter((record) => record.t === 'step')
+        .forEach((record, index) => Object.assign(record, stepVars[index]))
+    }
     const steps = toSteps(records, language, code, array)
     const traceError = records.find((record) => record.t === 'error')
     const done = records.find((record) => record.t === 'done')
@@ -465,6 +605,8 @@ async function runInTempDir({ language, code, array, target, spec, slot }) {
       finalArray: done?.final ?? null,
       // Giá trị hàm trả về (index với thuật toán tìm kiếm), null nếu không phải số nguyên.
       result: done?.result ?? null,
+      // Danh sách liên kết: node đầu của danh sách hàm trả về (id đã chuẩn hóa), null nếu rỗng.
+      resultNode: spec.kind === 'sllMethod' ? normalizeNodeIds(steps, done?.resultNode) : null,
       output: (fileOutput ?? result?.stdout ?? '').slice(0, MAX_OUTPUT_LENGTH),
       error: error && { type: error.type, line: error.line, message: error.message },
     }
@@ -477,7 +619,7 @@ async function runInTempDir({ language, code, array, target, spec, slot }) {
   }
 }
 
-function validate({ algorithm, language, code, array, target }) {
+function validate({ algorithm, language, code, array, target, position }) {
   if (!Object.hasOwn(algorithmSpecs, algorithm)) return 'Thuật toán không được hỗ trợ.'
   if (!LANGUAGES.includes(language)) return 'Ngôn ngữ không được hỗ trợ.'
   if (typeof code !== 'string' || !code.trim()) return 'Chưa có code để chạy.'
@@ -487,7 +629,12 @@ function validate({ algorithm, language, code, array, target }) {
     array.length <= MAX_ARRAY_LENGTH &&
     array.every((value) => Number.isInteger(value) && Math.abs(value) <= 1e6)
   if (!validArray) return 'Mảng đầu vào không hợp lệ.'
-  const needsTarget = algorithmSpecs[algorithm].kind === 'search'
+  const { kind, params = [] } = algorithmSpecs[algorithm]
+  const needsPosition = params.includes('pos')
+  if (needsPosition && !(Number.isInteger(position) && position >= 0 && position <= 1000)) {
+    return 'Vị trí không hợp lệ.'
+  }
+  const needsTarget = kind === 'search' || params.includes('val')
   if (needsTarget && !(Number.isInteger(target) && Math.abs(target) <= 1e6)) {
     return 'Giá trị cần tìm không hợp lệ.'
   }
@@ -520,6 +667,7 @@ export async function runCode(request) {
       code: request.code.replace(/\r\n/g, '\n'),
       array: request.array,
       target: Number.isInteger(request.target) ? request.target : 0,
+      position: Number.isInteger(request.position) ? request.position : 0,
       spec: algorithmSpecs[request.algorithm],
       slot,
     })

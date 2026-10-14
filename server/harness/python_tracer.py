@@ -1,7 +1,11 @@
 """Chạy hàm của sinh viên (vd. bubble_sort(arr)) và ghi lại từng dòng được thực thi.
 
 Cách gọi: python python_tracer.py <code_path> <trace_path> <max_steps> <config_json>
-config: {"array": [...], "entry": [tên hàm...], "kind": "sort" | "sortRange" | "search", "target": số}
+config: {"array": [...], "entry": [tên hàm...], "kind": ..., "target": số, "args": [...]}
+  kind: "sort" | "sortRange" | "search" | "sllMethod" (xem src/data/algorithmSpecs.js)
+Với "sllMethod", file là main.py của project Singly Linked List: "array" là giá trị danh sách ban đầu;
+tracer tạo SLL(), gắn danh sách vào head rồi gọi phương thức entry(*args). Mỗi step có thêm "heap":
+các node đi tới được từ biến cục bộ (kể cả self.head).
 Mỗi dòng của trace_path là một bản ghi JSON: step / error / done.
 """
 import json
@@ -13,6 +17,28 @@ SOLUTION = '<solution>'
 
 class StepLimit(BaseException):
     pass
+
+
+MAX_NODES = 60
+
+
+def is_node(value):
+    # Node: object có .val và .next (lớp Node trong main.py).
+    return not isinstance(value, type) and hasattr(value, 'val') and hasattr(value, 'next')
+
+
+def is_list_object(value):
+    # Object giữ danh sách (SLL): có .head, không phải node.
+    return not isinstance(value, type) and not is_node(value) and hasattr(value, 'head')
+
+
+def walk(node):
+    """Các node đi theo next từ `node` (dừng nếu gặp vòng lặp)."""
+    seen = set()
+    while is_node(node) and id(node) not in seen and len(seen) < MAX_NODES:
+        seen.add(id(node))
+        yield node
+        node = node.next
 
 
 def main():
@@ -51,7 +77,9 @@ def main():
             list.__setitem__(self, index, value)
             record(self, index, writes)
 
-    arr = TrackedList(config['array'])
+    # Với danh sách liên kết, `array` là giá trị các node chứ không phải mảng được truyền vào hàm.
+    is_list = config['kind'] == 'sllMethod'
+    arr = TrackedList([] if is_list else config['array'])
 
     def snapshot():
         return [
@@ -71,6 +99,8 @@ def main():
             return value if value == value and abs(value) != float('inf') else str(value)
         if isinstance(value, str):
             return repr(value if len(value) <= 40 else value[:40] + '…')
+        if is_node(value):
+            return {'node': id(value), 'val': describe(value.val)}
         if isinstance(value, (list, tuple)):
             items = list(list.__iter__(value)) if isinstance(value, list) else list(value)
             return {'list': [describe(x) if isinstance(x, (bool, int, float, str)) or x is None
@@ -84,25 +114,49 @@ def main():
         for name, value in frame.f_locals.items():
             if name.startswith('__') or value is arr or callable(value) or type(value).__name__ == 'module':
                 continue
+            if is_list_object(value):
+                # `self` của SLL: hiện field head (vd. "self.head") thay cho cả object.
+                result[name + '.head'] = describe(value.head)
+                continue
             result[name] = describe(value)
         return result
 
-    state = {'line': None, 'count': 0, 'frame': None}
+    def heap(frame):
+        """Các node đi tới được từ biến cục bộ của frame: [{id, val, next}]."""
+        nodes, seen = [], set()
+        for value in frame.f_locals.values():
+            if is_list_object(value):
+                value = value.head
+            for node in walk(value):
+                if id(node) in seen:
+                    break
+                seen.add(id(node))
+                nodes.append({'id': id(node), 'val': describe(node.val),
+                              'next': id(node.next) if is_node(node.next) else None})
+        return nodes
+
+    # skip: lớp mà phương thức của nó không theo dõi (Node trong main.py — phần chỉ đọc của project).
+    state = {'line': None, 'count': 0, 'frame': None, 'skip': None}
 
     def flush():
         if state['line'] is None:
             return
         # Biến lấy SAU khi dòng chạy xong, cùng thời điểm với trạng thái mảng.
         frame = state['frame']
-        emit({'t': 'step', 'line': state['line'], 'array': snapshot(),
-              'reads': reads[:], 'writes': writes[:],
-              'scope': frame.f_code.co_name, 'vars': variables(frame)})
+        record = {'t': 'step', 'line': state['line'], 'array': snapshot(),
+                  'reads': reads[:], 'writes': writes[:],
+                  'scope': frame.f_code.co_name, 'vars': variables(frame)}
+        if is_list:
+            record['heap'] = heap(frame)
+        emit(record)
         del reads[:], writes[:]
         state['line'] = None
         state['frame'] = None
 
     def tracer(frame, event, arg):
         if frame.f_code.co_filename != SOLUTION:
+            return None
+        if event == 'call' and state['skip'] and isinstance(frame.f_locals.get('self'), state['skip']):
             return None
         if event == 'line':
             flush()
@@ -133,7 +187,28 @@ def main():
               'message': '%s: %s' % (type(e).__name__, e)})
         return
 
-    entry = next((namespace[n] for n in config['entry'] if callable(namespace.get(n))), None)
+    if is_list:
+        # Dựng danh sách ban đầu (chưa theo dõi) rồi lấy phương thức cần chạy của một SLL mới.
+        node_class, list_class = namespace.get('Node'), namespace.get('SLL')
+        if not callable(node_class) or not callable(list_class):
+            emit({'t': 'error', 'kind': 'signature', 'line': None, 'message': ''})
+            return
+        try:
+            sll = list_class()
+            head = None
+            for value in reversed(config['array']):
+                node = node_class(value)
+                node.next = head
+                head = node
+            sll.head = head
+        except Exception as e:
+            emit({'t': 'error', 'kind': 'runtime', 'line': solution_line(e.__traceback__),
+                  'message': '%s: %s' % (type(e).__name__, e)})
+            return
+        entry = next((getattr(sll, n) for n in config['entry'] if callable(getattr(sll, n, None))), None)
+        state['skip'] = node_class
+    else:
+        entry = next((namespace[n] for n in config['entry'] if callable(namespace.get(n))), None)
     if entry is None:
         emit({'t': 'error', 'kind': 'signature', 'line': None, 'message': ''})
         return
@@ -141,7 +216,9 @@ def main():
     try:
         sys.settrace(tracer)
         try:
-            if config['kind'] == 'sortRange':
+            if is_list:
+                result = entry(*config['args'])
+            elif config['kind'] == 'sortRange':
                 result = entry(arr, 0, len(arr) - 1)
             elif config['kind'] == 'search':
                 result = entry(arr, config['target'])
@@ -159,6 +236,12 @@ def main():
         return
 
     flush()
+    if is_list:
+        # Kết quả là danh sách bắt đầu từ head của SLL sau khi phương thức chạy xong.
+        head = getattr(sll, 'head', None)
+        emit({'t': 'done', 'final': [describe(node.val) for node in walk(head)], 'result': None,
+              'resultNode': id(head) if is_node(head) else None})
+        return
     is_index = isinstance(result, int) and not isinstance(result, bool)
     emit({'t': 'done', 'final': snapshot(), 'result': result if is_index else None})
 

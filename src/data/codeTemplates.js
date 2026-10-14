@@ -413,6 +413,399 @@ export const codeTemplates = {
       '}', // 13
     ],
   },
+  // --- Singly Linked List: mỗi thao tác là một phương thức của class SLL (thay đổi head tại chỗ).
+  // Python: phương thức trong class (thụt 4 dấu cách); C++: định nghĩa trong SLL.cpp; Java: trong
+  // class SLL. Số dòng tính từ dòng khai báo phương thức; project ghép các phương thức thành file
+  // (src/data/projects/singlyLinkedList.js).
+  insertAtHead: {
+    python: [
+      '    def insert_at_head(self, val):', // 0
+      '        new_node = Node(val)', // 1
+      '        new_node.next = self.head', // 2
+      '        self.head = new_node', // 3
+    ],
+    cpp: [
+      'void SLL::insertAtHead(int val) {', // 0
+      '    Node* newNode = new Node(val);', // 1
+      '    newNode->next = head;', // 2
+      '    head = newNode;', // 3
+      '}', // 4
+    ],
+    java: [
+      '    public void insertAtHead(int val) {', // 0
+      '        Node newNode = new Node(val);', // 1
+      '        newNode.next = head;', // 2
+      '        head = newNode;', // 3
+      '    }', // 4
+    ],
+  },
+  insertAtTail: {
+    python: [
+      '    def insert_at_tail(self, val):', // 0
+      '        new_node = Node(val)', // 1
+      '        if self.head is None:', // 2
+      '            self.head = new_node', // 3
+      '            return', // 4
+      '        curr = self.head', // 5
+      '        while curr.next is not None:', // 6
+      '            curr = curr.next', // 7
+      '        curr.next = new_node', // 8
+    ],
+    cpp: [
+      'void SLL::insertAtTail(int val) {', // 0
+      '    Node* newNode = new Node(val);', // 1
+      '    if (head == nullptr) {', // 2
+      '        head = newNode;', // 3
+      '        return;', // 4
+      '    }', // 5
+      '    Node* curr = head;', // 6
+      '    while (curr->next != nullptr) {', // 7
+      '        curr = curr->next;', // 8
+      '    }', // 9
+      '    curr->next = newNode;', // 10
+      '}', // 11
+    ],
+    java: [
+      '    public void insertAtTail(int val) {', // 0
+      '        Node newNode = new Node(val);', // 1
+      '        if (head == null) {', // 2
+      '            head = newNode;', // 3
+      '            return;', // 4
+      '        }', // 5
+      '        Node curr = head;', // 6
+      '        while (curr.next != null) {', // 7
+      '            curr = curr.next;', // 8
+      '        }', // 9
+      '        curr.next = newNode;', // 10
+      '    }', // 11
+    ],
+  },
+  insertAtPosition: {
+    python: [
+      '    def insert_at_position(self, pos, val):', // 0
+      '        if pos == 0:', // 1
+      '            new_node = Node(val)', // 2
+      '            new_node.next = self.head', // 3
+      '            self.head = new_node', // 4
+      '            return', // 5
+      '        curr = self.head', // 6
+      '        index = 0', // 7
+      '        while curr is not None and index < pos - 1:', // 8
+      '            curr = curr.next', // 9
+      '            index += 1', // 10
+      '        if curr is None:', // 11
+      '            return', // 12
+      '        new_node = Node(val)', // 13
+      '        new_node.next = curr.next', // 14
+      '        curr.next = new_node', // 15
+    ],
+    cpp: [
+      'void SLL::insertAtPosition(int pos, int val) {', // 0
+      '    if (pos == 0) {', // 1
+      '        Node* newNode = new Node(val);', // 2
+      '        newNode->next = head;', // 3
+      '        head = newNode;', // 4
+      '        return;', // 5
+      '    }', // 6
+      '    Node* curr = head;', // 7
+      '    int index = 0;', // 8
+      '    while (curr != nullptr && index < pos - 1) {', // 9
+      '        curr = curr->next;', // 10
+      '        index++;', // 11
+      '    }', // 12
+      '    if (curr == nullptr) {', // 13
+      '        return;', // 14
+      '    }', // 15
+      '    Node* newNode = new Node(val);', // 16
+      '    newNode->next = curr->next;', // 17
+      '    curr->next = newNode;', // 18
+      '}', // 19
+    ],
+    java: [
+      '    public void insertAtPosition(int pos, int val) {', // 0
+      '        if (pos == 0) {', // 1
+      '            Node newNode = new Node(val);', // 2
+      '            newNode.next = head;', // 3
+      '            head = newNode;', // 4
+      '            return;', // 5
+      '        }', // 6
+      '        Node curr = head;', // 7
+      '        int index = 0;', // 8
+      '        while (curr != null && index < pos - 1) {', // 9
+      '            curr = curr.next;', // 10
+      '            index++;', // 11
+      '        }', // 12
+      '        if (curr == null) {', // 13
+      '            return;', // 14
+      '        }', // 15
+      '        Node newNode = new Node(val);', // 16
+      '        newNode.next = curr.next;', // 17
+      '        curr.next = newNode;', // 18
+      '    }', // 19
+    ],
+  },
+  deleteAtHead: {
+    python: [
+      '    def delete_at_head(self):', // 0
+      '        if self.head is None:', // 1
+      '            return', // 2
+      '        old_head = self.head', // 3
+      '        self.head = self.head.next', // 4
+      '        old_head.next = None', // 5
+    ],
+    cpp: [
+      'void SLL::deleteAtHead() {', // 0
+      '    if (head == nullptr) {', // 1
+      '        return;', // 2
+      '    }', // 3
+      '    Node* oldHead = head;', // 4
+      '    head = head->next;', // 5
+      '    oldHead->next = nullptr;', // 6
+      '}', // 7
+    ],
+    java: [
+      '    public void deleteAtHead() {', // 0
+      '        if (head == null) {', // 1
+      '            return;', // 2
+      '        }', // 3
+      '        Node oldHead = head;', // 4
+      '        head = head.next;', // 5
+      '        oldHead.next = null;', // 6
+      '    }', // 7
+    ],
+  },
+  deleteAtTail: {
+    python: [
+      '    def delete_at_tail(self):', // 0
+      '        if self.head is None:', // 1
+      '            return', // 2
+      '        if self.head.next is None:', // 3
+      '            self.head = None', // 4
+      '            return', // 5
+      '        curr = self.head', // 6
+      '        while curr.next.next is not None:', // 7
+      '            curr = curr.next', // 8
+      '        curr.next = None', // 9
+    ],
+    cpp: [
+      'void SLL::deleteAtTail() {', // 0
+      '    if (head == nullptr) {', // 1
+      '        return;', // 2
+      '    }', // 3
+      '    if (head->next == nullptr) {', // 4
+      '        head = nullptr;', // 5
+      '        return;', // 6
+      '    }', // 7
+      '    Node* curr = head;', // 8
+      '    while (curr->next->next != nullptr) {', // 9
+      '        curr = curr->next;', // 10
+      '    }', // 11
+      '    curr->next = nullptr;', // 12
+      '}', // 13
+    ],
+    java: [
+      '    public void deleteAtTail() {', // 0
+      '        if (head == null) {', // 1
+      '            return;', // 2
+      '        }', // 3
+      '        if (head.next == null) {', // 4
+      '            head = null;', // 5
+      '            return;', // 6
+      '        }', // 7
+      '        Node curr = head;', // 8
+      '        while (curr.next.next != null) {', // 9
+      '            curr = curr.next;', // 10
+      '        }', // 11
+      '        curr.next = null;', // 12
+      '    }', // 13
+    ],
+  },
+  deleteAtPosition: {
+    python: [
+      '    def delete_at_position(self, pos):', // 0
+      '        if self.head is None:', // 1
+      '            return', // 2
+      '        if pos == 0:', // 3
+      '            self.head = self.head.next', // 4
+      '            return', // 5
+      '        curr = self.head', // 6
+      '        index = 0', // 7
+      '        while curr.next is not None and index < pos - 1:', // 8
+      '            curr = curr.next', // 9
+      '            index += 1', // 10
+      '        if curr.next is None:', // 11
+      '            return', // 12
+      '        curr.next = curr.next.next', // 13
+    ],
+    cpp: [
+      'void SLL::deleteAtPosition(int pos) {', // 0
+      '    if (head == nullptr) {', // 1
+      '        return;', // 2
+      '    }', // 3
+      '    if (pos == 0) {', // 4
+      '        head = head->next;', // 5
+      '        return;', // 6
+      '    }', // 7
+      '    Node* curr = head;', // 8
+      '    int index = 0;', // 9
+      '    while (curr->next != nullptr && index < pos - 1) {', // 10
+      '        curr = curr->next;', // 11
+      '        index++;', // 12
+      '    }', // 13
+      '    if (curr->next == nullptr) {', // 14
+      '        return;', // 15
+      '    }', // 16
+      '    curr->next = curr->next->next;', // 17
+      '}', // 18
+    ],
+    java: [
+      '    public void deleteAtPosition(int pos) {', // 0
+      '        if (head == null) {', // 1
+      '            return;', // 2
+      '        }', // 3
+      '        if (pos == 0) {', // 4
+      '            head = head.next;', // 5
+      '            return;', // 6
+      '        }', // 7
+      '        Node curr = head;', // 8
+      '        int index = 0;', // 9
+      '        while (curr.next != null && index < pos - 1) {', // 10
+      '            curr = curr.next;', // 11
+      '            index++;', // 12
+      '        }', // 13
+      '        if (curr.next == null) {', // 14
+      '            return;', // 15
+      '        }', // 16
+      '        curr.next = curr.next.next;', // 17
+      '    }', // 18
+    ],
+  },
+  deleteValue: {
+    python: [
+      '    def delete_by_value(self, val):', // 0
+      '        if self.head is None:', // 1
+      '            return', // 2
+      '        if self.head.val == val:', // 3
+      '            self.head = self.head.next', // 4
+      '            return', // 5
+      '        prev = self.head', // 6
+      '        curr = self.head.next', // 7
+      '        while curr is not None:', // 8
+      '            if curr.val == val:', // 9
+      '                prev.next = curr.next', // 10
+      '                return', // 11
+      '            prev = curr', // 12
+      '            curr = curr.next', // 13
+    ],
+    cpp: [
+      'void SLL::deleteByValue(int val) {', // 0
+      '    if (head == nullptr) {', // 1
+      '        return;', // 2
+      '    }', // 3
+      '    if (head->val == val) {', // 4
+      '        head = head->next;', // 5
+      '        return;', // 6
+      '    }', // 7
+      '    Node* prev = head;', // 8
+      '    Node* curr = head->next;', // 9
+      '    while (curr != nullptr) {', // 10
+      '        if (curr->val == val) {', // 11
+      '            prev->next = curr->next;', // 12
+      '            return;', // 13
+      '        }', // 14
+      '        prev = curr;', // 15
+      '        curr = curr->next;', // 16
+      '    }', // 17
+      '}', // 18
+    ],
+    java: [
+      '    public void deleteByValue(int val) {', // 0
+      '        if (head == null) {', // 1
+      '            return;', // 2
+      '        }', // 3
+      '        if (head.val == val) {', // 4
+      '            head = head.next;', // 5
+      '            return;', // 6
+      '        }', // 7
+      '        Node prev = head;', // 8
+      '        Node curr = head.next;', // 9
+      '        while (curr != null) {', // 10
+      '            if (curr.val == val) {', // 11
+      '                prev.next = curr.next;', // 12
+      '                return;', // 13
+      '            }', // 14
+      '            prev = curr;', // 15
+      '            curr = curr.next;', // 16
+      '        }', // 17
+      '    }', // 18
+    ],
+  },
+  reverseList: {
+    python: [
+      '    def reverse(self):', // 0
+      '        prev = None', // 1
+      '        curr = self.head', // 2
+      '        while curr is not None:', // 3
+      '            next_node = curr.next', // 4
+      '            curr.next = prev', // 5
+      '            prev = curr', // 6
+      '            curr = next_node', // 7
+      '        self.head = prev', // 8
+    ],
+    cpp: [
+      'void SLL::reverse() {', // 0
+      '    Node* prev = nullptr;', // 1
+      '    Node* curr = head;', // 2
+      '    while (curr != nullptr) {', // 3
+      '        Node* nextNode = curr->next;', // 4
+      '        curr->next = prev;', // 5
+      '        prev = curr;', // 6
+      '        curr = nextNode;', // 7
+      '    }', // 8
+      '    head = prev;', // 9
+      '}', // 10
+    ],
+    java: [
+      '    public void reverse() {', // 0
+      '        Node prev = null;', // 1
+      '        Node curr = head;', // 2
+      '        while (curr != null) {', // 3
+      '            Node nextNode = curr.next;', // 4
+      '            curr.next = prev;', // 5
+      '            prev = curr;', // 6
+      '            curr = nextNode;', // 7
+      '        }', // 8
+      '        head = prev;', // 9
+      '    }', // 10
+    ],
+  },
+  traverse: {
+    python: [
+      '    def traverse(self):', // 0
+      '        curr = self.head', // 1
+      '        while curr is not None:', // 2
+      '            print(curr.val, end=\' \')', // 3
+      '            curr = curr.next', // 4
+    ],
+    cpp: [
+      'void SLL::traverse() {', // 0
+      '    Node* curr = head;', // 1
+      '    while (curr != nullptr) {', // 2
+      '        std::cout << curr->val << " ";', // 3
+      '        curr = curr->next;', // 4
+      '    }', // 5
+      '}', // 6
+    ],
+    java: [
+      '    public void traverse() {', // 0
+      '        Node curr = head;', // 1
+      '        while (curr != null) {', // 2
+      '            System.out.print(curr.val + " ");', // 3
+      '            curr = curr.next;', // 4
+      '        }', // 5
+      '    }', // 6
+    ],
+  },
 }
 
 const BUBBLE_LINES = {
@@ -499,6 +892,14 @@ const BINARY_LINES = {
   CHECK_LESS: 6,
   GO_RIGHT: 7,
   GO_LEFT: 9,
+}
+
+
+// Line map cho phương thức SLL: `python` đầy đủ; bản C++/Java (dùng chung số dòng) lấy theo Python,
+// chỉ ghi đè các thao tác lệch dòng vì có thêm dòng `}`.
+const sllLines = (python, braceOverrides) => {
+  const brace = { ...python, ...braceOverrides }
+  return { python, cpp: brace, java: brace }
 }
 
 // Thao tác -> số dòng trong template tương ứng. Sửa template thì phải sửa cả bảng này.
@@ -591,4 +992,138 @@ export const codeLines = {
     cpp: { ...BINARY_LINES, NOT_FOUND: 12 },
     java: { ...BINARY_LINES, NOT_FOUND: 12 },
   },
+  // Singly Linked List: số dòng tính từ dòng khai báo phương thức (C++ và Java giống nhau).
+  insertAtHead: sllLines({ FUNCTION: 0, CREATE: 1, LINK: 2, MOVE_HEAD: 3 }, {}),
+  insertAtTail: sllLines(
+    { FUNCTION: 0, CREATE: 1, CHECK_EMPTY: 2, SET_HEAD: 3, RETURN_EARLY: 4, INIT_CURR: 5, WHILE: 6, ADVANCE: 7, LINK: 8 },
+    { INIT_CURR: 6, WHILE: 7, ADVANCE: 8, LINK: 10 },
+  ),
+  insertAtPosition: sllLines(
+    {
+      FUNCTION: 0,
+      CHECK_FRONT: 1,
+      CREATE_FRONT: 2,
+      LINK_FRONT: 3,
+      MOVE_HEAD: 4,
+      RETURN_FRONT: 5,
+      INIT_CURR: 6,
+      INIT_INDEX: 7,
+      WHILE: 8,
+      ADVANCE: 9,
+      INCREMENT: 10,
+      CHECK_NULL: 11,
+      RETURN_UNCHANGED: 12,
+      CREATE: 13,
+      LINK: 14,
+      ATTACH: 15,
+    },
+    {
+      INIT_CURR: 7,
+      INIT_INDEX: 8,
+      WHILE: 9,
+      ADVANCE: 10,
+      INCREMENT: 11,
+      CHECK_NULL: 13,
+      RETURN_UNCHANGED: 14,
+      CREATE: 16,
+      LINK: 17,
+      ATTACH: 18,
+    },
+  ),
+  deleteAtHead: sllLines(
+    { FUNCTION: 0, CHECK_EMPTY: 1, RETURN_EMPTY: 2, SAVE_OLD: 3, MOVE_HEAD: 4, DETACH: 5 },
+    { SAVE_OLD: 4, MOVE_HEAD: 5, DETACH: 6 },
+  ),
+  deleteAtTail: sllLines(
+    {
+      FUNCTION: 0,
+      CHECK_EMPTY: 1,
+      RETURN_EMPTY: 2,
+      CHECK_SINGLE: 3,
+      CLEAR: 4,
+      RETURN_SINGLE: 5,
+      INIT_CURR: 6,
+      WHILE: 7,
+      ADVANCE: 8,
+      DETACH: 9,
+    },
+    { CHECK_SINGLE: 4, CLEAR: 5, RETURN_SINGLE: 6, INIT_CURR: 8, WHILE: 9, ADVANCE: 10, DETACH: 12 },
+  ),
+  deleteAtPosition: sllLines(
+    {
+      FUNCTION: 0,
+      CHECK_EMPTY: 1,
+      RETURN_EMPTY: 2,
+      CHECK_FRONT: 3,
+      MOVE_HEAD: 4,
+      RETURN_FRONT: 5,
+      INIT_CURR: 6,
+      INIT_INDEX: 7,
+      WHILE: 8,
+      ADVANCE: 9,
+      INCREMENT: 10,
+      CHECK_NULL: 11,
+      RETURN_UNCHANGED: 12,
+      UNLINK: 13,
+    },
+    {
+      CHECK_FRONT: 4,
+      MOVE_HEAD: 5,
+      RETURN_FRONT: 6,
+      INIT_CURR: 8,
+      INIT_INDEX: 9,
+      WHILE: 10,
+      ADVANCE: 11,
+      INCREMENT: 12,
+      CHECK_NULL: 14,
+      RETURN_UNCHANGED: 15,
+      UNLINK: 17,
+    },
+  ),
+  deleteValue: sllLines(
+    {
+      FUNCTION: 0,
+      CHECK_EMPTY: 1,
+      RETURN_EMPTY: 2,
+      CHECK_HEAD: 3,
+      MOVE_HEAD: 4,
+      RETURN_HEAD: 5,
+      INIT_PREV: 6,
+      INIT_CURR: 7,
+      WHILE: 8,
+      COMPARE: 9,
+      UNLINK: 10,
+      RETURN_FOUND: 11,
+      ADVANCE_PREV: 12,
+      ADVANCE_CURR: 13,
+    },
+    {
+      CHECK_HEAD: 4,
+      MOVE_HEAD: 5,
+      RETURN_HEAD: 6,
+      INIT_PREV: 8,
+      INIT_CURR: 9,
+      WHILE: 10,
+      COMPARE: 11,
+      UNLINK: 12,
+      RETURN_FOUND: 13,
+      ADVANCE_PREV: 15,
+      ADVANCE_CURR: 16,
+    },
+  ),
+  reverseList: sllLines(
+    {
+      FUNCTION: 0,
+      INIT_PREV: 1,
+      INIT_CURR: 2,
+      WHILE: 3,
+      SAVE_NEXT: 4,
+      REVERSE_LINK: 5,
+      ADVANCE_PREV: 6,
+      ADVANCE_CURR: 7,
+      SET_HEAD: 8,
+    },
+    { SET_HEAD: 9 },
+  ),
+  traverse: sllLines({ FUNCTION: 0, INIT_CURR: 1, WHILE: 2, VISIT: 3, ADVANCE: 4 }, {}),
 }

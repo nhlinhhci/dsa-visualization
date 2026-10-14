@@ -40,8 +40,15 @@ const buttonClass =
 //   createInput(algorithm)            -> { array, target? }
 //   renderArea(step, input)           -> phần trực quan hóa bên trái
 //   InputControls?                    -> component { input, onChange } cho ô nhập thêm trên thanh điều khiển
+//   getIdleStep?(input, language)     -> step hiển thị khi chưa chạy code (mặc định: mảng ban đầu)
+//   getProject?({ language, userText, input, showResult })
+//                                     -> IDE dạng project nhiều file (xem LinkedListVisualizer):
+//                                        { files, workFile, protectedRange, runCode, extractSll,
+//                                          focusLine, answerLineOffset }
+//   inputLabels?                      -> { random, custom, maxLength, allowEmpty } cho hai nút tạo dữ liệu
+// renderArea nhận thêm step liền trước (để tô những gì vừa thay đổi).
 //   getVerdict(input, run)            -> { isCorrect, success, failure: [dòng...] }
-//   getFinalStep(input, run, isCorrect) -> step kết thúc sau khi code sinh viên chạy xong
+//   getFinalStep(input, run, isCorrect, language) -> step kết thúc sau khi code sinh viên chạy xong
 function AlgorithmVisualizer({
   algorithm,
   mode,
@@ -58,6 +65,8 @@ function AlgorithmVisualizer({
   const [optimized, setOptimized] = useState(false)
   const [showResult, setShowResult] = useState(false)
   const [run, setRun] = useState(IDLE_RUN)
+  // Tab đang mở trong IDE dạng project; null = file sinh viên viết code.
+  const [openedFile, setOpenedFile] = useState(null)
   // Tăng mỗi khi kết quả đang chờ không còn hợp lệ (đổi code, đổi mảng...) để bỏ qua response cũ.
   const runIdRef = useRef(0)
 
@@ -67,7 +76,12 @@ function AlgorithmVisualizer({
 
   const answerSteps = useMemo(
     () =>
-      algorithm.generateSteps(input.array, { optimized, language, target: input.target }),
+      algorithm.generateSteps(input.array, {
+        optimized,
+        language,
+        target: input.target,
+        position: input.position,
+      }),
     [algorithm, input, optimized, language],
   )
   const verdict = useMemo(
@@ -76,18 +90,27 @@ function AlgorithmVisualizer({
   )
   const userSteps = useMemo(() => {
     if (run.status !== 'done' || (run.steps.length === 0 && !run.finalArray)) {
-      return [idleStep(input.array)]
+      return [mode.getIdleStep?.(input, language) ?? idleStep(input.array)]
     }
     if (!verdict) return run.steps
-    return [...run.steps, mode.getFinalStep(input, run, verdict.isCorrect)]
-  }, [mode, input, run, verdict])
+    return [...run.steps, mode.getFinalStep(input, run, verdict.isCorrect, language)]
+  }, [mode, input, run, verdict, language])
 
   const steps = showResult ? answerSteps : userSteps
   const templateKey = optimized ? `${algorithm.id}Optimized` : algorithm.id
   const complexity = optimized ? algorithm.optimizedComplexity : algorithm.complexity
+  const project = useMemo(
+    () => mode.getProject?.({ language, userText: userCode[language], input, showResult }),
+    [mode, language, userCode, input, showResult],
+  )
   const code = useMemo(
-    () => (showResult ? codeTemplates[templateKey][language] : userCode[language].split('\n')),
-    [showResult, templateKey, language, userCode],
+    () =>
+      project
+        ? null
+        : showResult
+          ? codeTemplates[templateKey][language]
+          : userCode[language].split('\n'),
+    [project, showResult, templateKey, language, userCode],
   )
 
   const lastStepIndex = steps.length - 1
@@ -99,6 +122,11 @@ function AlgorithmVisualizer({
   const previousVarStepIndex = steps.findLastIndex(
     (item, index) => index < varStepIndex && item.vars,
   )
+  // Code đáp án của project: số dòng trong step tính từ phương thức, cộng thêm vị trí của nó trong file.
+  const currentLine =
+    showResult && project && step.lineHighlighted !== null
+      ? step.lineHighlighted + project.answerLineOffset
+      : step.lineHighlighted
   const isAtEnd = currentStepIndex >= lastStepIndex
   // Tới bước cuối thì coi như đã dừng, không cần setState thêm trong effect.
   const isAutoPlaying = isPlaying && !isAtEnd
@@ -140,12 +168,14 @@ function AlgorithmVisualizer({
   const handleChangeLanguage = (nextLanguage) => {
     // Step của đáp án giống nhau ở mọi ngôn ngữ nên giữ nguyên vị trí; code tự viết thì không.
     if (!showResult) resetPlayback()
+    setOpenedFile(null)
     setLanguage(nextLanguage)
   }
 
   const handleCodeChange = (value) => {
     if (showResult) return
-    onUserCodeChange(language, value)
+    // Project: chỉ lưu phần sinh viên viết (vd. class SLL trong main.py), không lưu phần chỉ đọc.
+    onUserCodeChange(language, project ? project.extractSll(value) : value)
     if (run.status !== 'idle') resetPlayback()
   }
 
@@ -154,12 +184,15 @@ function AlgorithmVisualizer({
     setIsPlaying(false)
     setCurrentStepIndex(0)
     setRun({ ...IDLE_RUN, status: 'running' })
+    // Mở lại file sinh viên viết để thấy dòng đang chạy.
+    setOpenedFile(null)
     const result = await runCode({
       algorithm: algorithm.id,
       language,
-      code: userCode[language],
+      code: project ? project.runCode : userCode[language],
       array: input.array,
       target: input.target,
+      position: input.position,
     })
     if (runId !== runIdRef.current) return
     setRun({ ...result, status: 'done' })
@@ -188,7 +221,7 @@ function AlgorithmVisualizer({
   return (
     <div className="flex flex-1 flex-col gap-4">
       <header className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-700 bg-slate-900 p-3">
-        <h1 className="mr-auto text-lg font-bold">{algorithm.name}</h1>
+        <h1 className="mr-auto text-lg font-bold">{algorithm.title}</h1>
 
         <button
           type="button"
@@ -196,9 +229,12 @@ function AlgorithmVisualizer({
           onClick={() => handleChangeInput(mode.createInput(algorithm))}
         >
           <Shuffle className="h-4 w-4" />
-          Tạo mảng ngẫu nhiên
+          {mode.inputLabels?.random ?? 'Tạo mảng ngẫu nhiên'}
         </button>
         <CustomArrayInput
+          label={mode.inputLabels?.custom}
+          maxLength={mode.inputLabels?.maxLength}
+          allowEmpty={mode.inputLabels?.allowEmpty}
           requiresSorted={Boolean(algorithm.requiresSortedInput)}
           onSubmit={(array) => handleChangeInput({ ...input, array })}
           buttonClass={buttonClass}
@@ -269,7 +305,7 @@ function AlgorithmVisualizer({
 
       <main className="grid flex-1 grid-cols-1 content-start items-start gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-4">
-          {mode.renderArea(step, input)}
+          {mode.renderArea(step, input, steps[shownStepIndex - 1])}
           <VariablesPanel
             step={steps[varStepIndex]}
             previousStep={steps[previousVarStepIndex]}
@@ -279,7 +315,14 @@ function AlgorithmVisualizer({
         </div>
         <IDEPanel
           code={code}
-          currentLine={step.lineHighlighted}
+          files={project?.files}
+          activeFile={openedFile ?? project?.workFile}
+          onSelectFile={setOpenedFile}
+          workFile={project?.workFile}
+          protectedRange={showResult ? null : project?.protectedRange}
+          focusLine={project?.focusLine}
+          focusKey={`${algorithm.id}:${language}:${showResult}`}
+          currentLine={currentLine}
           language={language}
           setLanguage={handleChangeLanguage}
           editable={!showResult && !isRunning}
@@ -333,7 +376,7 @@ function AlgorithmVisualizer({
         {showComplexity && (
           <div className="w-full max-w-xl overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
             <div className="border-b border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold">
-              Độ phức tạp của {algorithm.name}
+              Độ phức tạp của {algorithm.title}
               {optimized && ' (tối ưu)'}
             </div>
             <table className="w-full text-sm">

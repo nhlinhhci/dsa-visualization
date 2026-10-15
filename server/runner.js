@@ -119,6 +119,11 @@ const TOOLS = {
   java: () => findTool('java', ['java'], ['-XshowSettings:properties', '-version']),
 }
 
+// gdb tạo một worker thread cho mỗi CPU, mỗi thread giữ một malloc arena 64MB địa chỉ ảo: trên máy
+// nhiều core (vd. 32) là vượt giới hạn --as của sandbox và gdb chết vì "virtual memory exhausted".
+// -iex chạy trước khi gdb nạp file chương trình (lúc các thread được tạo).
+const GDB_ARGS = ['-nx', '-q', '-batch', '-iex', 'maint set worker-threads 0']
+
 const MISSING_TOOL = {
   python: 'Server chưa cài Python 3 (không tìm thấy lệnh `python`).',
   cpp: 'Server chưa cài trình biên dịch C++ (không tìm thấy lệnh `g++` hoặc `clang++`).',
@@ -280,9 +285,7 @@ async function runCppSll({ dir, code, array, target, position, spec, tracePath, 
   return exec(
     debuggerTool.command,
     [
-      '-nx',
-      '-q',
-      '-batch',
+      ...GDB_ARGS,
       '-ex',
       `python VARS_PATH=r'${tracePath}.vars'; MODE='lines'; ENTRY='SLL::${spec.entry.cpp}'; ` +
         `MAX_STEPS=${MAX_STEPS}; SOLUTION_FILE='SLL.cpp'`,
@@ -333,9 +336,7 @@ async function runCpp({ dir, code, array, target, position, spec, tracePath, san
   return exec(
     debuggerTool.command,
     [
-      '-nx',
-      '-q',
-      '-batch',
+      ...GDB_ARGS,
       '-ex',
       `python VARS_PATH=r'${tracePath}.vars'`,
       '-x',

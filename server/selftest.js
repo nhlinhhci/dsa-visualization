@@ -82,11 +82,21 @@ const parallel = await Promise.all(
         language,
         code: codeTemplates.quickSort[language].join('\n'),
         array,
-      }).then((run) => JSON.stringify(run.finalArray) === JSON.stringify([...array].sort((a, b) => a - b)))
+      }).then((run) =>
+        JSON.stringify(run.finalArray) === JSON.stringify([...array].sort((a, b) => a - b))
+          ? null
+          : `${language}+${offset} ${JSON.stringify(run.error ?? run.finalArray)}`,
+      )
     }),
   ),
 )
-report(parallel.every(Boolean), 'parallel runs', `${parallel.filter(Boolean).length}/${parallel.length}`)
+const parallelFailures = parallel.filter(Boolean)
+report(
+  parallelFailures.length === 0,
+  'parallel runs',
+  `${parallel.length - parallelFailures.length}/${parallel.length}${parallelFailures.map((failure) => `
+     ${failure}`).join('')}`,
+)
 
 if (status.sandbox && status.languages.python) {
   const probe = (body) =>
